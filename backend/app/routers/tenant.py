@@ -1,0 +1,318 @@
+import os
+import re
+import json
+import logging
+import threading
+import shutil
+import uuid
+import httpx
+from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+
+from app.core.security import require_tenant, get_current_tenant
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/tenant", tags=["tenant"])
+
+# Thread lock for synchronizing file access
+tenant_file_lock = threading.Lock()
+
+# Secret fields that must never be returned by the profile GET endpoint,
+# and that must only be overwritten when a non-empty value is supplied.
+SECRET_FIELDS = (
+    "line_channel_access_token",
+    "line_channel_secret",
+    "facebook_page_access_token",
+    "facebook_verify_token",
+)
+
+# Path-traversal guard: tenant_id feeds data/tenant_profile_{id}.json and static/images/{id}.
+_TENANT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _validate_tenant_id(tenant_id: str) -> None:
+    """Reject tenant_id values that could escape the data/ or static/ directories."""
+    if not _TENANT_ID_RE.match(tenant_id or ""):
+        raise HTTPException(status_code=400, detail="Invalid tenant_id.")
+
+
+def _enforce_tenant(tenant_id: str, current_tenant) -> None:
+    """Assert the path tenant_id matches the token's tenant (403 otherwise).
+
+    Only enforced when FastAPI has resolved `current_tenant` to a real string.
+    When these functions are invoked directly (e.g. unit tests bypassing the
+    HTTP layer), `current_tenant` is still the unresolved Depends sentinel, so
+    the check is skipped — HTTP callers always get a resolved string.
+    """
+    if isinstance(current_tenant, str):
+        require_tenant(tenant_id, current_tenant)
+
+class ServiceItem(BaseModel):
+    name: str
+    price: str
+    duration: int = 30  # duration in minutes
+
+class StaffItem(BaseModel):
+    name: str
+    role: str = ""
+    specialties: list[str] = []
+    experience: str = ""
+    qualifications: str = ""
+    languages: list[str] = []
+    schedule: str = ""
+    special_interests: list[str] = []
+    board_cert: str = ""
+
+class PromotionItem(BaseModel):
+    name: str
+    description: str = ""
+    discount: str = ""
+    valid_until: str = ""
+    conditions: str = ""
+    image_url: str = ""
+
+class FAQItem(BaseModel):
+    question: str
+    answer: str
+
+class CustomRuleItem(BaseModel):
+    category: str
+    rule: str
+
+class WebchatSettings(BaseModel):
+    enabled: bool = True
+    theme_color: str = "#2B6CB0"
+    welcome_message: str = "สวัสดีค่ะ! ยินดีต้อนรับสู่บริการผู้ช่วย AI ของเรา มีอะไรให้ช่วยวันนี้คะ?"
+
+class AISettings(BaseModel):
+    model_name: str = "gpt-4o-mini"
+    temperature: float = 0.2
+    cag_token_threshold: int = 15000
+    # LINE reply pacing: 'slow' (AIS-like human typing, default) | 'normal' | 'off'.
+    humanize_mode: str = "slow"
+
+class BookingSettings(BaseModel):
+    conflict_window_mins: int = 30
+    min_lead_time_hours: int = 2
+
+class TenantProfile(BaseModel):
+    company_name: str = ""
+    business_hours: str = ""
+    services: list[ServiceItem] = []
+    contact_number: str = ""
+    staff: list[StaffItem] = []
+    promotions: list[PromotionItem] = []
+    faq: list[FAQItem] = []
+    custom_rules: list[CustomRuleItem] = []
+    webhook_domain: str = ""
+    line_channel_access_token: str = ""
+    line_channel_secret: str = ""
+    facebook_page_access_token: str = ""
+    facebook_verify_token: str = ""
+    webchat_settings: WebchatSettings = WebchatSettings()
+    ai_settings: AISettings = AISettings()
+    booking_settings: BookingSettings = BookingSettings()
+
+def _get_profile_path(tenant_id: str) -> str:
+    return f"data/tenant_profile_{tenant_id}.json"
+
+@router.get("/profile/{tenant_id}")
+async def get_profile(tenant_id: str = Depends(require_tenant)):
+    """
+    Retrieves the structured business profile details for a given tenant_id.
+    The path tenant_id must match the caller's verified token (403 otherwise).
+
+    Returns all NON-secret profile fields plus computed booleans
+    `line_configured` / `facebook_configured`. The four secret fields
+    (line/facebook tokens & secrets) are NEVER included in the response.
+    """
+    _validate_tenant_id(tenant_id)
+    file_path = _get_profile_path(tenant_id)
+    with tenant_file_lock:
+        if not os.path.exists(file_path):
+            # Return default empty profile (normalised via the model).
+            data = TenantProfile().model_dump()
+        else:
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                # Normalise through the model so defaults/shape are consistent.
+                data = TenantProfile(**raw).model_dump()
+            except Exception as e:
+                logger.error(f"Error loading tenant profile for {tenant_id}: {e}")
+                raise HTTPException(status_code=500, detail="Failed to load tenant profile.")
+
+    # Compute configuration booleans from the (still-present) secret values.
+    line_configured = bool(str(data.get("line_channel_access_token") or "").strip())
+    facebook_configured = bool(str(data.get("facebook_page_access_token") or "").strip())
+
+    # Strip secrets before returning.
+    for field in SECRET_FIELDS:
+        data.pop(field, None)
+
+    data["line_configured"] = line_configured
+    data["facebook_configured"] = facebook_configured
+    return data
+
+@router.post("/profile/{tenant_id}")
+async def save_profile(
+    tenant_id: str,
+    profile: TenantProfile,
+    current_tenant: str = Depends(get_current_tenant),
+):
+    """
+    Saves or updates the structured business profile details for a given tenant_id.
+    Invalidates the Redis CAG/RAG cached profile. The path tenant_id must match
+    the caller's verified token (403 otherwise).
+    """
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    file_path = _get_profile_path(tenant_id)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    try:
+        profile_dict = profile.model_dump()
+        explicit_fields = profile.model_fields_set
+
+        with tenant_file_lock:
+            # Load existing data if file exists
+            existing_data = {}
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        existing_data = json.load(f)
+                except Exception as read_err:
+                    logger.warning(f"Could not read existing profile to merge: {read_err}")
+
+            # Merge explicitly set fields from incoming request into existing_data.
+            # For the four secret fields, an empty/absent value means 'unchanged' —
+            # only overwrite when a non-empty value is provided. This is critical
+            # because GET no longer returns secrets, so the SettingsPage POSTs ''
+            # for them and that must NOT wipe the stored token/secret.
+            for field in TenantProfile.model_fields.keys():
+                if field not in explicit_fields:
+                    continue
+                value = profile_dict[field]
+                if field in SECRET_FIELDS and not str(value or "").strip():
+                    # Preserve existing secret; empty incoming value = unchanged.
+                    logger.info(f"Preserving existing secret field '{field}' (empty incoming value).")
+                    continue
+                existing_data[field] = value
+                if field in SECRET_FIELDS:
+                    logger.info(f"Updating secret field '{field}' in tenant profile.")
+                else:
+                    logger.info(f"Updating field '{field}' in tenant profile.")
+
+            # Save merged profile to local JSON file
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"Saved structured profile for tenant {tenant_id}")
+        
+        # Clear Redis Cache for RAG/CAG so it rebuilds with updated values
+        from app.core.redis import get_redis
+        try:
+            redis_client = get_redis()
+            cache_key = f"tenant_cag_profile:{tenant_id}"
+            await redis_client.delete(cache_key)
+            logger.info(f"Invalidated Redis CAG profile cache for tenant '{tenant_id}' due to profile update.")
+        except Exception as cache_err:
+            logger.warning(f"Failed to clear Redis CAG profile cache: {cache_err}")
+            
+        return {"status": "success", "message": "Tenant profile saved successfully."}
+    except Exception as e:
+        logger.error(f"Error saving tenant profile for {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save tenant profile.")
+
+@router.post("/upload-image/{tenant_id}")
+async def upload_tenant_image(
+    tenant_id: str,
+    file: UploadFile = File(...),
+    current_tenant: str = Depends(get_current_tenant),
+):
+    """
+    Uploads an image file for a tenant (e.g. promotion image) and returns its
+    static URL. The path tenant_id must match the caller's verified token.
+    """
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    allowed_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Only images are allowed (.jpg, .jpeg, .png, .webp, .gif)")
+        
+    promo_images_dir = f"static/images/{tenant_id}/promotions"
+    os.makedirs(promo_images_dir, exist_ok=True)
+    
+    unique_filename = f"{uuid.uuid4().hex}{ext}"
+    target_path = os.path.join(promo_images_dir, unique_filename)
+    
+    try:
+        with open(target_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        logger.error(f"Failed to save uploaded image: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save uploaded image.")
+        
+    static_url = f"/static/images/{tenant_id}/promotions/{unique_filename}"
+    return {"status": "success", "image_url": static_url}
+
+
+class VerifyLineRequest(BaseModel):
+    access_token: str = ""
+
+
+LINE_BOT_INFO_URL = "https://api.line.me/v2/bot/info"
+
+
+@router.post("/verify-line/{tenant_id}")
+async def verify_line(
+    tenant_id: str,
+    body: VerifyLineRequest | None = None,
+    current_tenant: str = Depends(get_current_tenant),
+):
+    """
+    Verifies a LINE Channel Access Token by calling LINE's bot info endpoint.
+
+    Uses the supplied token if provided; otherwise falls back to the tenant's
+    saved token from the profile file. Returns bot display name + picture on
+    success, or a plain-Thai error reason on failure. Never leaks the token.
+    The path tenant_id must match the caller's verified token.
+    """
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+
+    access_token = (body.access_token if body else "") or ""
+    access_token = access_token.strip()
+
+    # Fall back to the tenant's stored token when none supplied.
+    if not access_token:
+        file_path = _get_profile_path(tenant_id)
+        with tenant_file_lock:
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        saved = json.load(f)
+                    access_token = str(saved.get("line_channel_access_token") or "").strip()
+                except Exception as read_err:
+                    logger.warning(f"Could not read tenant profile for LINE verify: {read_err}")
+
+    if not access_token:
+        return {"valid": False, "error": "ยังไม่ได้ใส่ Channel Access Token"}
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(LINE_BOT_INFO_URL, headers=headers, timeout=5.0)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "valid": True,
+                "bot_name": data.get("displayName", ""),
+                "picture_url": data.get("pictureUrl") or "",
+            }
+        logger.info(f"LINE verify failed for tenant {tenant_id}: HTTP {response.status_code}")
+    except Exception as e:
+        logger.warning(f"LINE verify error for tenant {tenant_id}: {e}")
+
+    return {"valid": False, "error": "โทเคนไม่ถูกต้องหรือหมดอายุ"}

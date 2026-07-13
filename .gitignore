@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+backend/venv/
+
+# Environment / Secrets
+.env
+.env.*
+
+# Data (local dev only)
+data/chroma/
+
+# PII / secret data files — local JSON storage (contain customer PII & business data).
+# Ignored going forward; existing tracked copies must be untracked manually
+# (git rm --cached) — see report.
+backend/data/tenant_profile_*.json
+backend/data/users.json
+backend/data/bookings.json
+backend/data/documents.json
+backend/data/*.json
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Static uploads (generated at runtime)
+backend/static/images/
+
+# Auto-generated JWT signing secret (per-install)
+backend/data/.jwt_secret
+
+# AI Coding Assistants (Claude Code & Antigravity)
+.claude/
+.clauderules
+.claude-agent-state
+.antigravity/
+.antigravityrules
+

@@ -1,0 +1,45 @@
+# Render Blueprint for the GenieAI backend (FastAPI).
+# Deploy: Render Dashboard -> New -> Blueprint -> pick this repo. Or configure a
+# Web Service manually using the same settings below.
+services:
+  - type: web
+    name: genieai-backend
+    runtime: python
+    rootDir: backend                    # the FastAPI app lives in backend/
+    plan: free                          # 'free' spins down after 15 min idle + WIPES data on redeploy.
+                                        # Change to 'starter' (paid) to attach the persistent disk below.
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # JWT_SECRET: Render generates a strong value ONCE and keeps it stable across
+      # deploys, so users stay logged in. (Do NOT rely on the local auto-generated
+      # data/.jwt_secret in production — the free filesystem is wiped on redeploy.)
+      - key: JWT_SECRET
+        generateValue: true
+      # --- Secrets: set these values in the Render dashboard (sync:false = not in git) ---
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: REDIS_URL                  # Upstash Redis URL (rediss://...) — already external, works in prod
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: CORS_ORIGINS               # your Vercel URL, e.g. https://genieai.vercel.app
+        sync: false
+
+    # ---------------------------------------------------------------------------
+    # PERSISTENT DATA (paid plans only). Without this, users/bookings/tenant
+    # profiles/documents/ChromaDB reset on every redeploy/restart. To keep data:
+    #   1. set  plan: starter  (above)
+    #   2. uncomment the disk block below
+    # ---------------------------------------------------------------------------
+    # disk:
+    #   name: genieai-data
+    #   mountPath: /opt/render/project/src/backend/data
+    #   sizeGB: 1

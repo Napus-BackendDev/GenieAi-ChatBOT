@@ -1,0 +1,257 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import "@heroui/styles";
+
+@variant dark (.dark &);
+
+
+@theme {
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Custom Brand Theme Colors */
+  --color-brand-navy: #1A365D;
+  --color-brand-blue: #2B6CB0;
+  --color-brand-light: #E6F4F8;
+  --color-brand-cyan: #A2D9E8;
+  --color-brand-red: #E53E3E;
+  --color-brand-green: #38A169;
+
+  /* Additional animations */
+  --animate-scanline: scanLine 2.5s linear infinite;
+
+  /* Bridge tokens for utility classes used across the app. */
+  --color-content1: var(--surface);
+  --color-content2: var(--surface-secondary);
+  --color-divider: var(--separator);
+  --color-default-50: var(--background);
+  --color-default-100: var(--default);
+  --color-default-300: var(--border);
+  --color-default-400: var(--muted);
+  --color-default-500: var(--muted);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Hide scrollbar utility */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+
+/* Layout adjustments */
+.admin-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+}
+
+.main-content {
+  padding: 0;
+  overflow-y: auto;
+  max-height: calc(100vh - 70px);
+  display: flex;
+  flex-direction: column;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease forwards;
+}
+
+/* Premium UI Redesign Helper Styles */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.dark .glass-panel {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.light .glass-panel {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.glow-indigo-cyan:hover {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15), 0 0 40px rgba(6, 182, 212, 0.1);
+  border-color: rgba(99, 102, 241, 0.3);
+}
+
+.glow-emerald:hover {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.pulse-ring {
+  box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+  animation: pulseRing 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+.pulse-ring-success {
+  box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+  animation: pulseRingSuccess 2s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+.hover-scale {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.hover-scale:hover {
+  transform: translateY(-2px) scale(1.01);
+}
+
+@keyframes pulseRing {
+  0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
+@keyframes pulseRingSuccess {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scanLine {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+/* Dashboard Topbar Layout refinements */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background-color: rgba(230, 244, 248, 0.15);
+}
+
+.top-bar {
+  height: 70px;
+  border-bottom: 1px solid rgba(162, 217, 232, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+/* Custom CSS Charts & Visualizations */
+.chart-bar-container {
+  display: flex;
+  align-items: flex-end;
+  height: 150px;
+  gap: 12px;
+}
+
+.chart-bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  height: 100%;
+  justify-content: flex-end;
+}
+
+.chart-bar-value-wrapper {
+  width: 100%;
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 120px;
+}
+
+.chart-bar-segment {
+  flex: 1;
+  border-radius: 4px 4px 0 0;
+  transition: height 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chart-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* CSS Donut Chart */
+.donut-svg {
+  transform: rotate(-90deg);
+  border-radius: 50%;
+}
+
+.donut-segment {
+  fill: none;
+  stroke-width: 6;
+  transition: stroke-dasharray 0.5s ease;
+}
+
+/* Custom Scrollbars for dashboard lists */
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Brand Gradient Utilities & Glowing Styles */
+.bg-brand-navy-gradient {
+  background: linear-gradient(135deg, #1A365D 0%, #2B6CB0 100%);
+}
+
+.bg-brand-cyan-gradient {
+  background: linear-gradient(135deg, #E6F4F8 0%, #A2D9E8 100%);
+}
+
+.glow-brand-blue {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glow-brand-blue:hover {
+  box-shadow: 0 10px 30px -10px rgba(43, 108, 176, 0.3), 0 0 20px rgba(162, 217, 232, 0.15);
+  border-color: rgba(43, 108, 176, 0.4);
+}
+
+/* Infinite Marquee Loop Animation */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+
+

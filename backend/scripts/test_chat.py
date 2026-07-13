@@ -1,0 +1,126 @@
+import sys
+import os
+import asyncio
+
+# Adjust Python path to allow running from the root of the backend folder
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Set logging config before imports
+import logging
+logging.basicConfig(level=logging.ERROR) # set to ERROR to keep terminal clean
+
+from app.services.rag import query_knowledge_base, retrieve_hybrid_context
+from app.services.redis_service import get_chat_history, add_chat_message
+from app.services.openai_service import chat_completion_with_tools
+from datetime import datetime
+
+async def simulate_chat(user_message: str, session_id: str = "test_user_session"):
+    tenant_id = "default"
+    
+    # 1. Query RAG/CAG context & associated page images
+    rag_result = await retrieve_hybrid_context(user_message, tenant_id=tenant_id)
+    context = rag_result.get("context", "")
+    images = rag_result.get("images", [])
+    mode = rag_result.get("mode", "rag")
+    
+    # 2. Get chat history from Redis
+    history = await get_chat_history(session_id=session_id, tenant_id=tenant_id)
+    
+    # 3. Add current user message to Redis history
+    await add_chat_message(session_id=session_id, role="user", content=user_message, tenant_id=tenant_id)
+    
+    # 4. Formulate System Prompt
+    system_prompt = (
+        "คุณคือ AI Business Assistant เลขาส่วนตัวอัจฉริยะของร้านค้า/ธุรกิจแห่งนี้ "
+        "หน้าที่ของคุณคือการตอบคำถามลูกค้าอย่างสุภาพ อบอุ่น และช่วยเหลือการจองนัดหมาย "
+        "กรุณาทำตามแนวทางและข้อบังคับต่อไปนี้อย่างเคร่งครัด:\n"
+        "1. หากหัวข้อที่ลูกค้าถามไม่เกี่ยวกับเนื้อหาที่ระบุ ให้ใช้ความรู้ภายนอกตอบอย่างสุภาพว่าไม่มีระบุในคู่มือ แต่พร้อมช่วยเหลือข้อมูลเบื้องต้น.\n"
+        "2. กฎเหล็กของการนัดหมาย:\n"
+        "   - เมื่อลูกค้าสนใจนัดหมาย คุณต้องเรียกใช้ฟังก์ชัน 'check_booking_availability' ก่อนเสมอเพื่อตรวจสอบความว่าง ห้ามยืนยันหรือคาดเดาความว่างเอง.\n"
+        "   - การทำนัดหมายจำเป็นต้องใช้ข้อมูล 4 อย่าง: ชื่อผู้ติดต่อ, เบอร์โทรศัพท์, อีเมล, และประเภทบริการ/หัวข้อนัดหมาย. "
+        "หากข้อมูลยังไม่ครบถ้วน ให้สอบถามลูกค้าทีละคำถามอย่างเป็นมิตร.\n"
+        "   - เมื่อได้ข้อมูลครบทั้ง 4 อย่างแล้ว และตรวจสอบแล้วว่าเวลาดังกล่าวว่าง คุณต้องเรียกใช้ฟังก์ชัน 'create_booking' ทันที เพื่อลงทะเบียนนัดหมายเข้าระบบจริง. "
+        "ห้ามสมมติ เขียน หรือแจ้งลูกค้าว่าลงนัดสำเร็จแล้วในข้อความแชตโดยที่ไม่ได้เรียกใช้ฟังก์ชัน 'create_booking' จริงเด็ดขาด.\n"
+        "3. ตอบกลับเป็นภาษาไทยที่กระชับ สุภาพ และอ่านง่าย."
+    )
+    
+    if mode == "cag":
+        system_prompt += (
+            "\n\nใช้เนื้อหาจากเอกสารความรู้ธุรกิจต่อไปนี้ในการตอบคำถามเป็นหลัก:\n"
+            "====================\n"
+            f"{context}\n"
+            "====================\n"
+        )
+        rag_context_message = None
+    else:
+        rag_context_message = {
+            "role": "system",
+            "content": (
+                "ใช้เนื้อหาจากเอกสารความรู้ธุรกิจต่อไปนี้ในการตอบคำถามเป็นหลัก:\n"
+                "====================\n"
+                f"{context}\n"
+                "====================\n"
+            )
+        }
+        
+    current_time_str = datetime.now().strftime("%A, %d %B %Y %H:%M") # omit seconds to avoid hourly cache miss
+    time_instruction_msg = {
+        "role": "system",
+        "content": f"[SYSTEM INFO] ข้อมูลปัจจุบัน (Current Time): วันนี้คือวัน {current_time_str}. ให้ใช้ข้อมูลนี้ประกอบการระบุวันเวลาสำหรับนัดหมาย เช่น 'วันพรุ่งนี้' หรือ 'วันศุกร์นี้'."
+    }
+    
+    final_messages = history.copy()
+    final_messages.append(time_instruction_msg)
+    if rag_context_message:
+        final_messages.append(rag_context_message)
+    final_messages.append({"role": "user", "content": user_message})
+    
+    # 5. Call OpenAI with history and context
+    ai_response = await chat_completion_with_tools(
+        messages=final_messages,
+        system_prompt=system_prompt,
+        tenant_id=tenant_id
+    )
+    
+    # 6. Save AI reply to Redis history
+    await add_chat_message(session_id=session_id, role="assistant", content=ai_response, tenant_id=tenant_id)
+    
+    print(f"\n🤖 AI: {ai_response}")
+    if images:
+        print(f"🖼️ Attached Images: {images}")
+
+async def main():
+    from app.core.redis import init_redis, close_redis
+    
+    print("[INFO] Connecting to remote Redis...")
+    await init_redis()
+    
+    print("\n=======================================================")
+    print("💬 เริ่มระบบทดสอบแชตบอตโลคอล (พิมพ์ 'exit' เพื่อยกเลิก)")
+    print("คุณสามารถทดสอบถามข้อมูลร้านค้าหรือพยายามนัดหมายคิวบริการได้")
+    print("=======================================================\n")
+    
+    try:
+        while True:
+            try:
+                # Use standard input in a synchronous blocking way (fine for simple interactive CLI)
+                user_input = input("👤 You: ")
+                if not user_input.strip():
+                    continue
+                if user_input.strip().lower() == "exit":
+                    print("\n[INFO] Exiting chat test.")
+                    break
+                    
+                await simulate_chat(user_input)
+            except (KeyboardInterrupt, EOFError):
+                print("\n[INFO] Exiting chat test.")
+                break
+    finally:
+        await close_redis()
+
+if __name__ == "__main__":
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    # Run the interactive session
+    asyncio.run(main())

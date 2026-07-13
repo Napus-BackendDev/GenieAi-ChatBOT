@@ -1,0 +1,14 @@
+fastapi==0.110.0
+uvicorn==0.28.0
+redis==5.0.3
+motor==3.4.0
+chromadb==0.4.24
+openai>=2.40,<3
+pydantic==2.6.4
+pydantic-settings==2.2.1
+python-multipart>=0.0.18
+pymupdf==1.23.26
+python-dotenv==1.0.1
+line-bot-sdk==3.6.0
+PyJWT>=2.8
+bcrypt>=4.1
