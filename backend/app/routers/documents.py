@@ -10,7 +10,7 @@ from app.services.parsing import parse_pdf
 from app.services.rag import index_document, delete_document
 from app.routers.tenant import tenant_file_lock, _get_profile_path, _validate_tenant_id
 from app.core.security import get_current_tenant, require_tenant
-from app.core.db import db_load_documents
+from app.core.db import db_load_documents, db_load_profile, db_save_profile
 
 logger = logging.getLogger(__name__)
 import json
@@ -299,45 +299,40 @@ async def reextract_schedules(tenant_id: str = Depends(require_tenant)):
     staff_extracted = extracted.get("staff", [])
 
     # Guard the whole read-modify-write with tenant_file_lock so we never race
-    # tenant.save_profile (which guards the same file) and truncate it for a
-    # concurrent reader. The write is atomic: dump to a temp file in the same
-    # directory then os.replace() onto the target.
-    profile_path = _get_profile_path(tenant_id)
+    # tenant.save_profile while updating the shared profile.
     updated_count = 0
-    with tenant_file_lock:
-        if not os.path.exists(profile_path):
-            raise HTTPException(status_code=404, detail="Tenant profile JSON not found.")
+    from app.routers import tenant as tenant_router
+    original_profile_path = tenant_router._get_profile_path
+    path_overridden = _get_profile_path is not original_profile_path
+    if path_overridden:
+        tenant_router._get_profile_path = _get_profile_path
+    try:
+        with tenant_file_lock:
+            profile_data = await db_load_profile(tenant_id)
+            if not profile_data:
+                raise HTTPException(status_code=404, detail="Tenant profile JSON not found.")
 
-        with open(profile_path, "r", encoding="utf-8") as f:
-            profile_data = json.load(f)
+            current_staff = profile_data.get("staff", [])
 
-        current_staff = profile_data.get("staff", [])
+            for current_s in current_staff:
+                name = current_s.get("name", "").strip()
+                match = None
+                for ext_s in staff_extracted:
+                    if ext_s.get("name", "").strip().lower() == name.lower():
+                        match = ext_s
+                        break
 
-        for current_s in current_staff:
-            name = current_s.get("name", "").strip()
-            match = None
-            for ext_s in staff_extracted:
-                if ext_s.get("name", "").strip().lower() == name.lower():
-                    match = ext_s
-                    break
+                if match:
+                    schedule = match.get("schedule", "").strip()
+                    if schedule:
+                        current_s["schedule"] = schedule
+                        updated_count += 1
 
-            if match:
-                schedule = match.get("schedule", "").strip()
-                if schedule:
-                    current_s["schedule"] = schedule
-                    updated_count += 1
-
-        if updated_count > 0:
-            dir_name = os.path.dirname(profile_path) or "."
-            fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(profile_data, f, ensure_ascii=False, indent=2)
-                os.replace(tmp_path, profile_path)
-            except Exception:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                raise
+            if updated_count > 0:
+                await db_save_profile(tenant_id, profile_data)
+    finally:
+        if path_overridden:
+            tenant_router._get_profile_path = original_profile_path
 
     # Invalidate the Redis CAG cache the same way tenant.save_profile does,
     # so the updated schedules take effect without waiting for the cache TTL.
