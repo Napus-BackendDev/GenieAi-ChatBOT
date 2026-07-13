@@ -238,9 +238,8 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`/api/tenant/profile/${tenantId}`);
+      const response = await fetch(`/api/tenant/profile/${tenantId}/staff`);
       const data = await response.json();
-      setProfile(data);
       setStaffList(data.staff || []);
     } catch (e) {
       console.error("Failed to load staff list:", e);
@@ -258,11 +257,10 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
     setSaving(true);
     setMessage({ type: '', text: '' });
     try {
-      const response = await fetch(`/api/tenant/profile/${tenantId}`, {
+      const response = await fetch(`/api/tenant/profile/${tenantId}/staff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...profile,
           staff: updatedList
         })
       });
@@ -273,7 +271,6 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
       }
 
       setStaffList(updatedList);
-      setProfile({ ...profile, staff: updatedList });
       setMessage({ type: 'success', text: t.saveSuccess });
     } catch (err) {
       setMessage({ type: 'error', text: err.message });

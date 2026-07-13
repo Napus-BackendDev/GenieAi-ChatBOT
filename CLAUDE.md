@@ -35,6 +35,7 @@ Two agents may work this repo at once. To avoid conflicts:
 - Split by area (e.g. one owns `backend/`, the other `frontend/`) and never let both edit the same file simultaneously.
 - Use separate git branches or worktrees; merge via PR. Don't point two agents at the same working tree.
 - Keep the three rule files in sync — `CLAUDE.md` (this file), `AGENTS.md` (Codex/others), `.antigravityrules` (Antigravity). Mirror any convention change across all three.
+- **No Automatic Git Pushes**: The agent MUST NEVER execute a `git push` command automatically. Pushing to GitHub must only occur when the user explicitly requests a push.
 - Prefer changing the shared source of truth in code (`app/services/prompt.py`) and `System.md` over restating rules in prose.
 
 ## Subagents & Operating Procedure

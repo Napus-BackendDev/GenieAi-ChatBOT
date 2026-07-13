@@ -303,3 +303,199 @@ async def verify_line(
         logger.warning(f"LINE verify error for tenant {tenant_id}: {e}")
 
     return {"valid": False, "error": "โทเคนไม่ถูกต้องหรือหมดอายุ"}
+
+
+async def _save_profile_field(tenant_id: str, field_name: str, field_value) -> None:
+    # Load existing profile
+    raw = await db_load_profile(tenant_id) or {}
+    
+    # Update field
+    raw[field_name] = field_value
+    
+    # Save back
+    await db_save_profile(tenant_id, raw)
+    
+    # Clear Redis Cache
+    from app.core.redis import get_redis
+    try:
+        redis_client = get_redis()
+        cache_key = f"tenant_cag_profile:{tenant_id}"
+        await redis_client.delete(cache_key)
+        logger.info(f"Invalidated Redis CAG profile cache for tenant '{tenant_id}' due to {field_name} update.")
+    except Exception as cache_err:
+        logger.warning(f"Failed to clear Redis CAG profile cache: {cache_err}")
+
+
+class ServicesUpdateRequest(BaseModel):
+    services: list[ServiceItem]
+
+
+@router.get("/profile/{tenant_id}/services")
+async def get_services(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    raw = await db_load_profile(tenant_id) or {}
+    return {"services": raw.get("services", [])}
+
+
+@router.post("/profile/{tenant_id}/services")
+async def update_services(tenant_id: str, body: ServicesUpdateRequest, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    services_list = [item.model_dump() for item in body.services]
+    await _save_profile_field(tenant_id, "services", services_list)
+    return {"status": "success", "message": "Services saved successfully."}
+
+
+class StaffUpdateRequest(BaseModel):
+    staff: list[StaffItem]
+
+
+@router.get("/profile/{tenant_id}/staff")
+async def get_staff(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    raw = await db_load_profile(tenant_id) or {}
+    return {"staff": raw.get("staff", [])}
+
+
+@router.post("/profile/{tenant_id}/staff")
+async def update_staff(tenant_id: str, body: StaffUpdateRequest, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    staff_list = [item.model_dump() for item in body.staff]
+    await _save_profile_field(tenant_id, "staff", staff_list)
+    return {"status": "success", "message": "Staff saved successfully."}
+
+
+class PromotionsUpdateRequest(BaseModel):
+    promotions: list[PromotionItem]
+
+
+@router.get("/profile/{tenant_id}/promotions")
+async def get_promotions(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    raw = await db_load_profile(tenant_id) or {}
+    return {"promotions": raw.get("promotions", [])}
+
+
+@router.post("/profile/{tenant_id}/promotions")
+async def update_promotions(tenant_id: str, body: PromotionsUpdateRequest, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    promotions_list = [item.model_dump() for item in body.promotions]
+    await _save_profile_field(tenant_id, "promotions", promotions_list)
+    return {"status": "success", "message": "Promotions saved successfully."}
+
+
+class FAQUpdateRequest(BaseModel):
+    faq: list[FAQItem]
+
+
+@router.get("/profile/{tenant_id}/faq")
+async def get_faq(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    raw = await db_load_profile(tenant_id) or {}
+    return {"faq": raw.get("faq", [])}
+
+
+@router.post("/profile/{tenant_id}/faq")
+async def update_faq(tenant_id: str, body: FAQUpdateRequest, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    faq_list = [item.model_dump() for item in body.faq]
+    await _save_profile_field(tenant_id, "faq", faq_list)
+    return {"status": "success", "message": "FAQ saved successfully."}
+
+
+class CustomRulesUpdateRequest(BaseModel):
+    custom_rules: list[CustomRuleItem]
+
+
+@router.get("/profile/{tenant_id}/custom-rules")
+async def get_custom_rules(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    raw = await db_load_profile(tenant_id) or {}
+    return {"custom_rules": raw.get("custom_rules", [])}
+
+
+@router.post("/profile/{tenant_id}/custom-rules")
+async def update_custom_rules(tenant_id: str, body: CustomRulesUpdateRequest, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    custom_rules_list = [item.model_dump() for item in body.custom_rules]
+    await _save_profile_field(tenant_id, "custom_rules", custom_rules_list)
+    return {"status": "success", "message": "Custom rules saved successfully."}
+
+
+class SettingsUpdateRequest(BaseModel):
+    company_name: str = ""
+    business_hours: str = ""
+    contact_number: str = ""
+    webhook_domain: str = ""
+    line_channel_access_token: str = ""
+    line_channel_secret: str = ""
+    facebook_page_access_token: str = ""
+    facebook_verify_token: str = ""
+    webchat_settings: WebchatSettings = WebchatSettings()
+    ai_settings: AISettings = AISettings()
+    booking_settings: BookingSettings = BookingSettings()
+
+
+@router.get("/profile/{tenant_id}/settings")
+async def get_settings(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    raw = await db_load_profile(tenant_id) or {}
+    
+    data = TenantProfile(**raw).model_dump()
+    
+    settings_keys = [
+        "company_name", "business_hours", "contact_number", "webhook_domain",
+        "webchat_settings", "ai_settings", "booking_settings",
+        "line_channel_access_token", "line_channel_secret",
+        "facebook_page_access_token", "facebook_verify_token"
+    ]
+    res = {k: data.get(k) for k in settings_keys}
+    
+    res["line_configured"] = bool(str(res.get("line_channel_access_token") or "").strip())
+    res["facebook_configured"] = bool(str(res.get("facebook_page_access_token") or "").strip())
+    
+    for field in SECRET_FIELDS:
+        res.pop(field, None)
+        
+    return res
+
+
+@router.post("/profile/{tenant_id}/settings")
+async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_tenant: str = Depends(get_current_tenant)):
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    
+    body_dict = body.model_dump()
+    explicit_fields = body.model_fields_set
+    
+    raw = await db_load_profile(tenant_id) or {}
+    
+    for field in SettingsUpdateRequest.model_fields.keys():
+        if field not in explicit_fields:
+            continue
+        val = body_dict[field]
+        if field in SECRET_FIELDS and not str(val or "").strip():
+            continue
+        raw[field] = val
+        
+    await db_save_profile(tenant_id, raw)
+    
+    from app.core.redis import get_redis
+    try:
+        redis_client = get_redis()
+        cache_key = f"tenant_cag_profile:{tenant_id}"
+        await redis_client.delete(cache_key)
+    except Exception:
+        pass
+        
+    return {"status": "success", "message": "Settings saved successfully."}

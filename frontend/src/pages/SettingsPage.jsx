@@ -169,7 +169,7 @@ const SettingsPage = ({ tenantId, lang }) => {
   const fetchSettings = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`/api/tenant/profile/${tenantId}`);
+      const res = await fetch(`/api/tenant/profile/${tenantId}/settings`);
       if (res.ok) {
         const data = await res.json();
         // GET no longer returns any secret tokens — only *_configured booleans.
@@ -196,7 +196,11 @@ const SettingsPage = ({ tenantId, lang }) => {
           booking_settings: {
             conflict_window_mins: data.booking_settings?.conflict_window_mins ?? 30,
             min_lead_time_hours: data.booking_settings?.min_lead_time_hours ?? 2
-          }
+          },
+          company_name: data.company_name || '',
+          business_hours: data.business_hours || '',
+          contact_number: data.contact_number || '',
+          webhook_domain: data.webhook_domain || ''
         });
       }
     } catch (e) {
@@ -241,7 +245,7 @@ const SettingsPage = ({ tenantId, lang }) => {
 
       const typedLineToken = settings.line_channel_access_token.trim();
 
-      const res = await fetch(`/api/tenant/profile/${tenantId}`, {
+      const res = await fetch(`/api/tenant/profile/${tenantId}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)

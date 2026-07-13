@@ -305,14 +305,14 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     fetchProfileAndDocs();
   }, [tenantId]);
 
-  const saveProfileData = async (updatedProfile) => {
+  const saveProfileData = async (subpath, payload) => {
     setSaving(true);
     setMessage({ type: '', text: '' });
     try {
-      const response = await fetch(`/api/tenant/profile/${tenantId}`, {
+      const response = await fetch(`/api/tenant/profile/${tenantId}/${subpath}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedProfile)
+        body: JSON.stringify(payload)
       });
 
       const data = await response.json();
@@ -320,6 +320,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
         throw new Error(data.detail || t.saveError);
       }
 
+      const updatedProfile = { ...profile, ...payload };
       setProfile(updatedProfile);
       setMessage({ type: 'success', text: t.saveSuccess });
       if (onProfileUpdate) {
@@ -332,9 +333,56 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     }
   };
 
-  const handleGeneralSave = (e) => {
+  const handleGeneralSave = async (e) => {
     e.preventDefault();
-    saveProfileData(profile);
+    setSaving(true);
+    setMessage({ type: '', text: '' });
+    try {
+      // 1. Save general settings
+      const settingsPayload = {
+        company_name: profile.company_name,
+        business_hours: profile.business_hours,
+        contact_number: profile.contact_number,
+        webhook_domain: profile.webhook_domain
+      };
+      const settingsRes = await fetch(`/api/tenant/profile/${tenantId}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settingsPayload)
+      });
+      if (!settingsRes.ok) {
+        const errData = await settingsRes.json().catch(() => ({}));
+        throw new Error(errData.detail || t.saveError);
+      }
+
+      // 2. Save custom rules
+      const rulesPayload = {
+        custom_rules: profile.custom_rules || []
+      };
+      const rulesRes = await fetch(`/api/tenant/profile/${tenantId}/custom-rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rulesPayload)
+      });
+      if (!rulesRes.ok) {
+        const errData = await rulesRes.json().catch(() => ({}));
+        throw new Error(errData.detail || t.saveError);
+      }
+
+      setMessage({ type: 'success', text: t.saveSuccess });
+      if (onProfileUpdate) {
+        onProfileUpdate(profile);
+      }
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleServicesSave = (e) => {
+    e.preventDefault();
+    saveProfileData('services', { services: profile.services || [] });
   };
 
   // SERVICES CRUD HANDLERS
@@ -398,7 +446,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
   const deletePromo = (idx) => {
     if (!window.confirm(t.confirmDeletePromo)) return;
     const updatedPromos = (profile.promotions || []).filter((_, i) => i !== idx);
-    saveProfileData({ ...profile, promotions: updatedPromos });
+    saveProfileData('promotions', { promotions: updatedPromos });
   };
 
   const handleImageUpload = async (e) => {
@@ -438,7 +486,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     }
 
     setPromoModalOpen(false);
-    saveProfileData({ ...profile, promotions: updatedPromos });
+    saveProfileData('promotions', { promotions: updatedPromos });
   };
 
   // Grouping and Filtering Helpers for Promotions
@@ -559,7 +607,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     });
 
     setCampaignSettingsModalOpen(false);
-    saveProfileData({ ...profile, promotions: updatedPromos });
+    saveProfileData('promotions', { promotions: updatedPromos });
   };
 
   const openAddSubPromo = (campaignName, campaign) => {
@@ -592,7 +640,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
   const deleteFaq = (idx) => {
     if (!window.confirm(t.confirmDeleteFaq)) return;
     const updatedFaqs = (profile.faq || []).filter((_, i) => i !== idx);
-    saveProfileData({ ...profile, faq: updatedFaqs });
+    saveProfileData('faq', { faq: updatedFaqs });
   };
 
   const submitFaqForm = (e) => {
@@ -607,7 +655,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     }
 
     setFaqModalOpen(false);
-    saveProfileData({ ...profile, faq: updatedFaqs });
+    saveProfileData('faq', { faq: updatedFaqs });
   };
   const handleCustomRuleChange = (idx, field, val) => {
     const updatedRules = [...(profile.custom_rules || [])];
@@ -697,7 +745,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
             <Card className="glass-panel border-white/5 shadow-sm p-6 rounded-2xl">
               <CardContent className="p-0 flex flex-col gap-6">
 
-              <form onSubmit={handleGeneralSave} className="flex flex-col gap-4">
+              <form onSubmit={handleServicesSave} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-3 max-h-[50vh] overflow-y-auto pr-1">
                   {(!profile.services || profile.services.length === 0) ? (
                     <div className="py-12 text-center text-slate-400 text-xs">

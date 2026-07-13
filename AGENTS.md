@@ -199,6 +199,8 @@ Tenant isolation is achieved through `tenant_id` parameter filtering at every la
   4. **Expectation (ผลลัพธ์ที่คาดหวัง)**: The exact expected changes (files created/modified, commands run).
   5. **Number (ตัวเลขสำคัญ/ข้อจำกัด)**: Any constraints, ports, files, counts, or limits relevant to this step.
 
+- **No Automatic Git Pushes**: The agent MUST NEVER execute a `git push` command automatically. Pushing to GitHub must only occur when the user explicitly requests a push.
+
 - **System Architecture Alignment**: The agent MUST refer to and read [System.md](file:///c:/Users/asus/Documents/GenieAI/System.md) at the beginning of any development task. All code modifications, logic structures, and architectural implementations must align strictly with the technical constraints, constants, and database design documented in [System.md](file:///c:/Users/asus/Documents/GenieAI/System.md) to ensure that the project never drifts from its specified boundaries.
 
 - **Token Optimization & Cost Reduction Guidelines**:
