@@ -8,8 +8,8 @@ import uuid
 import httpx
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
-
 from app.core.security import require_tenant, get_current_tenant
+from app.core.db import db_load_profile, db_save_profile
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/tenant", tags=["tenant"])
@@ -127,20 +127,17 @@ async def get_profile(tenant_id: str = Depends(require_tenant)):
     (line/facebook tokens & secrets) are NEVER included in the response.
     """
     _validate_tenant_id(tenant_id)
-    file_path = _get_profile_path(tenant_id)
-    with tenant_file_lock:
-        if not os.path.exists(file_path):
+    try:
+        raw = await db_load_profile(tenant_id)
+        if not raw:
             # Return default empty profile (normalised via the model).
             data = TenantProfile().model_dump()
         else:
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
-                # Normalise through the model so defaults/shape are consistent.
-                data = TenantProfile(**raw).model_dump()
-            except Exception as e:
-                logger.error(f"Error loading tenant profile for {tenant_id}: {e}")
-                raise HTTPException(status_code=500, detail="Failed to load tenant profile.")
+            # Normalise through the model so defaults/shape are consistent.
+            data = TenantProfile(**raw).model_dump()
+    except Exception as e:
+        logger.error(f"Error loading tenant profile for {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load tenant profile.")
 
     # Compute configuration booleans from the (still-present) secret values.
     line_configured = bool(str(data.get("line_channel_access_token") or "").strip())
@@ -167,45 +164,35 @@ async def save_profile(
     """
     _enforce_tenant(tenant_id, current_tenant)
     _validate_tenant_id(tenant_id)
-    file_path = _get_profile_path(tenant_id)
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
     try:
         profile_dict = profile.model_dump()
         explicit_fields = profile.model_fields_set
 
-        with tenant_file_lock:
-            # Load existing data if file exists
-            existing_data = {}
-            if os.path.exists(file_path):
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        existing_data = json.load(f)
-                except Exception as read_err:
-                    logger.warning(f"Could not read existing profile to merge: {read_err}")
+        # Load existing data
+        existing_data = await db_load_profile(tenant_id)
 
-            # Merge explicitly set fields from incoming request into existing_data.
-            # For the four secret fields, an empty/absent value means 'unchanged' —
-            # only overwrite when a non-empty value is provided. This is critical
-            # because GET no longer returns secrets, so the SettingsPage POSTs ''
-            # for them and that must NOT wipe the stored token/secret.
-            for field in TenantProfile.model_fields.keys():
-                if field not in explicit_fields:
-                    continue
-                value = profile_dict[field]
-                if field in SECRET_FIELDS and not str(value or "").strip():
-                    # Preserve existing secret; empty incoming value = unchanged.
-                    logger.info(f"Preserving existing secret field '{field}' (empty incoming value).")
-                    continue
-                existing_data[field] = value
-                if field in SECRET_FIELDS:
-                    logger.info(f"Updating secret field '{field}' in tenant profile.")
-                else:
-                    logger.info(f"Updating field '{field}' in tenant profile.")
+        # Merge explicitly set fields from incoming request into existing_data.
+        # For the four secret fields, an empty/absent value means 'unchanged' —
+        # only overwrite when a non-empty value is provided. This is critical
+        # because GET no longer returns secrets, so the SettingsPage POSTs ''
+        # for them and that must NOT wipe the stored token/secret.
+        for field in TenantProfile.model_fields.keys():
+            if field not in explicit_fields:
+                continue
+            value = profile_dict[field]
+            if field in SECRET_FIELDS and not str(value or "").strip():
+                # Preserve existing secret; empty incoming value = unchanged.
+                logger.info(f"Preserving existing secret field '{field}' (empty incoming value).")
+                continue
+            existing_data[field] = value
+            if field in SECRET_FIELDS:
+                logger.info(f"Updating secret field '{field}' in tenant profile.")
+            else:
+                logger.info(f"Updating field '{field}' in tenant profile.")
 
-            # Save merged profile to local JSON file
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(existing_data, f, ensure_ascii=False, indent=2)
+        # Save merged profile
+        await db_save_profile(tenant_id, existing_data)
         
         logger.info(f"Saved structured profile for tenant {tenant_id}")
         

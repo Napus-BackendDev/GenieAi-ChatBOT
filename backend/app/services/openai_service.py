@@ -10,20 +10,16 @@ logger = logging.getLogger(__name__)
 openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
-def load_tenant_ai_settings(tenant_id: str) -> dict:
+from app.core.db import db_load_profile
+
+async def load_tenant_ai_settings(tenant_id: str) -> dict:
     """
     Read a tenant's saved ai_settings (model_name, temperature, cag_token_threshold)
-    from data/tenant_profile_{tenant_id}.json. Returns {} if the file or key is
+    from DB or JSON. Returns {} if the file or key is
     missing so callers fall back to their own defaults.
     """
-    # ponytail: read the profile JSON directly (same path convention as
-    # prompt.load_tenant_profile_context); no Mongo yet, JSON is the source of truth.
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if not os.path.exists(profile_path):
-        return {}
     try:
-        with open(profile_path, "r", encoding="utf-8") as f:
-            profile = json.load(f)
+        profile = await db_load_profile(tenant_id)
         ai_settings = profile.get("ai_settings")
         return ai_settings if isinstance(ai_settings, dict) else {}
     except Exception as e:
@@ -143,15 +139,15 @@ async def chat_completion_with_tools(
     Iteratively resolves sequential tool calls (e.g., check availability -> create booking).
     """
     from app.services.booking_service import (
-        check_booking_availability_sync,
-        create_booking_sync,
-        get_staff_on_duty_sync,
+        check_booking_availability,
+        create_booking,
+        get_staff_on_duty,
     )
 
     full_messages = [{"role": "system", "content": system_prompt}] + messages
 
     # Apply the tenant's saved AI settings (falls back to defaults if unset).
-    ai_settings = load_tenant_ai_settings(tenant_id)
+    ai_settings = await load_tenant_ai_settings(tenant_id)
     model_name = ai_settings.get("model_name") or "gpt-4o-mini"
     try:
         temperature = float(ai_settings.get("temperature"))
@@ -196,19 +192,19 @@ async def chat_completion_with_tools(
                 
                 # Execute the matched tool
                 if function_name == "get_staff_on_duty":
-                    result = get_staff_on_duty_sync(
+                    result = await get_staff_on_duty(
                         day=function_args.get("day"),
                         tenant_id=tenant_id,
                         specialty=function_args.get("specialty")
                     )
                 elif function_name == "check_booking_availability":
-                    result = check_booking_availability_sync(
+                    result = await check_booking_availability(
                         booking_datetime=function_args.get("booking_datetime"),
                         tenant_id=tenant_id,
                         staff_name=function_args.get("staff_name")
                     )
                 elif function_name == "create_booking":
-                    result = create_booking_sync(
+                    result = await create_booking(
                         customer_name=function_args.get("customer_name"),
                         phone_number=function_args.get("phone_number"),
                         email=function_args.get("email"),

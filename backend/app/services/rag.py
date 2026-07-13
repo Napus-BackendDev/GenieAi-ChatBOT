@@ -34,30 +34,32 @@ def get_knowledge_collection():
         metadata={"hnsw:space": "cosine"}
     )
 
-# Document Metadata JSON Helpers
+from app.core.db import db_load_documents, db_save_documents, db_load_profile
+
+# Document Metadata Helpers
+import asyncio
+
 def _load_documents_meta() -> list[dict]:
     """
-    Load document metadata records from local JSON.
+    Load document metadata records.
     """
-    file_path = settings.DOCUMENTS_JSON_PATH
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    if not os.path.exists(file_path):
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump([], f, ensure_ascii=False, indent=2)
-        return []
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(db_load_documents())
 
 def _save_documents_meta(docs: list[dict]) -> None:
     """
-    Save document metadata records to local JSON.
+    Save document metadata records.
     """
-    file_path = settings.DOCUMENTS_JSON_PATH
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(docs, f, ensure_ascii=False, indent=2)
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    loop.run_until_complete(db_save_documents(docs))
 
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
     """
@@ -138,34 +140,30 @@ async def index_document(parsed_doc: dict, tenant_id: str = "default") -> None:
         )
         logger.info(f"Successfully indexed {len(ids)} chunks from '{doc_name}' into ChromaDB.")
         
-    # Save metadata to documents.json
-    with doc_file_lock:
-        docs_meta = _load_documents_meta()
-        docs_meta.append({
-            "document_id": doc_id,
-            "document_name": doc_name,
-            "tenant_id": tenant_id,
-            "pages": pages_meta,
-            "uploaded_at": chromadb.utils.embedding_functions.EmbeddingFunction.__class__.__name__ # dummy replacement
-        })
-        # Fix uploaded_at to standard ISO string
-        docs_meta[-1]["uploaded_at"] = chromadb.utils.embedding_functions.EmbeddingFunction.__class__.__name__ # Let's write correct string
-        import datetime
-        docs_meta[-1]["uploaded_at"] = datetime.datetime.utcnow().isoformat() + "Z"
-        _save_documents_meta(docs_meta)
+    # Save metadata
+    docs_meta = await db_load_documents()
+    docs_meta.append({
+        "document_id": doc_id,
+        "document_name": doc_name,
+        "tenant_id": tenant_id,
+        "pages": pages_meta,
+        "uploaded_at": chromadb.utils.embedding_functions.EmbeddingFunction.__class__.__name__
+    })
+    import datetime
+    docs_meta[-1]["uploaded_at"] = datetime.datetime.utcnow().isoformat() + "Z"
+    await db_save_documents(docs_meta)
 
-def get_images_for_page(document_id: str, page_number: int, tenant_id: str) -> list[str]:
+async def get_images_for_page(document_id: str, page_number: int, tenant_id: str) -> list[str]:
     """
     Resolves image URLs associated with a document's page number.
     """
-    with doc_file_lock:
-        docs_meta = _load_documents_meta()
-        for doc in docs_meta:
-            if doc.get("document_id") == document_id and doc.get("tenant_id") == tenant_id:
-                for page in doc.get("pages", []):
-                    if page.get("page_number") == page_number:
-                        return page.get("images", [])
-        return []
+    docs_meta = await db_load_documents()
+    for doc in docs_meta:
+        if doc.get("document_id") == document_id and doc.get("tenant_id") == tenant_id:
+            for page in doc.get("pages", []):
+                if page.get("page_number") == page_number:
+                    return page.get("images", [])
+    return []
 
 async def query_knowledge_base(query_text: str, tenant_id: str = "default", n_results: int = 5) -> dict:
     """
@@ -212,7 +210,7 @@ async def query_knowledge_base(query_text: str, tenant_id: str = "default", n_re
             context_chunks.append(f"[Source: {doc_name}, Page {page_num}]: {chunk_text}")
             
             # Resolve image URLs from pages
-            page_images = get_images_for_page(doc_id, page_num, tenant_id)
+            page_images = await get_images_for_page(doc_id, page_num, tenant_id)
             for img_url in page_images:
                 if img_url not in matched_images:
                     matched_images.append(img_url)
@@ -228,20 +226,12 @@ async def query_knowledge_base(query_text: str, tenant_id: str = "default", n_re
 CAG_TOKEN_THRESHOLD = 15000  # Approx 10k-12k words
 
 
-def _load_tenant_cag_threshold(tenant_id: str) -> int:
+async def _load_tenant_cag_threshold(tenant_id: str) -> int:
     """
-    Read the tenant's saved ai_settings.cag_token_threshold from
-    data/tenant_profile_{tenant_id}.json. Falls back to CAG_TOKEN_THRESHOLD
-    if the file, the ai_settings block, or the key is missing/invalid.
+    Read the tenant's saved ai_settings.cag_token_threshold from DB or JSON.
     """
-    # ponytail: read the profile JSON directly (same path convention used across
-    # the app); JSON remains the source of truth until the Mongo migration.
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if not os.path.exists(profile_path):
-        return CAG_TOKEN_THRESHOLD
     try:
-        with open(profile_path, "r", encoding="utf-8") as f:
-            profile = json.load(f)
+        profile = await db_load_profile(tenant_id)
         ai_settings = profile.get("ai_settings") or {}
         return int(ai_settings.get("cag_token_threshold", CAG_TOKEN_THRESHOLD))
     except Exception as e:
@@ -257,7 +247,7 @@ async def get_tenant_knowledge_profile(tenant_id: str) -> dict:
     # Use the tenant's configured CAG threshold (defaults to CAG_TOKEN_THRESHOLD).
     # Recomputed against the cached corpus below so a settings change takes effect
     # without waiting for the corpus cache to expire.
-    cag_threshold = _load_tenant_cag_threshold(tenant_id)
+    cag_threshold = await _load_tenant_cag_threshold(tenant_id)
 
     from app.core.redis import get_redis
     try:
@@ -276,7 +266,7 @@ async def get_tenant_knowledge_profile(tenant_id: str) -> dict:
         redis_client = None
 
     # Load documents metadata
-    docs_meta = _load_documents_meta()
+    docs_meta = await db_load_documents()
     
     # Check if there are any documents for this tenant
     tenant_docs = [d for d in docs_meta if d.get("tenant_id") == tenant_id]
@@ -346,16 +336,15 @@ async def delete_document(document_id: str, tenant_id: str = "default") -> bool:
     """
     # 1. Verify ownership via documents.json and remove its metadata.
     found = False
-    with doc_file_lock:
-        docs_meta = _load_documents_meta()
-        new_docs_meta = []
-        for doc in docs_meta:
-            if doc.get("document_id") == document_id and doc.get("tenant_id") == tenant_id:
-                found = True
-                continue
-            new_docs_meta.append(doc)
-        if found:
-            _save_documents_meta(new_docs_meta)
+    docs_meta = await db_load_documents()
+    new_docs_meta = []
+    for doc in docs_meta:
+        if doc.get("document_id") == document_id and doc.get("tenant_id") == tenant_id:
+            found = True
+            continue
+        new_docs_meta.append(doc)
+    if found:
+        await db_save_documents(new_docs_meta)
 
     if not found:
         logger.warning(f"Document metadata for '{document_id}' not found under tenant '{tenant_id}'")

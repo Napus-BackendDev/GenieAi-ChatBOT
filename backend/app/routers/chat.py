@@ -47,7 +47,7 @@ async def sandbox_chat(req: ChatRequest, current_tenant: str = Depends(get_curre
         
         # Load tenant profile via the shared, tenant-agnostic builder
         from app.services.prompt import load_tenant_profile_context, build_system_prompt, build_rag_context_message
-        profile_context = load_tenant_profile_context(tenant_id)
+        profile_context = await load_tenant_profile_context(tenant_id)
         
         # Merge contexts (prioritizing structured profile if it exists)
         full_context = ""

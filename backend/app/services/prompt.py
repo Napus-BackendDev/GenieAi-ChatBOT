@@ -77,18 +77,18 @@ def build_profile_context(p: dict) -> str:
     )
 
 
-def load_tenant_profile_context(tenant_id: str) -> str:
-    """Read a tenant's profile JSON and return the profile context block (or '')."""
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if not os.path.exists(profile_path):
-        return ""
+from app.core.db import db_load_profile
+
+async def load_tenant_profile_context(tenant_id: str) -> str:
+    """Read a tenant's profile from DB or JSON and return the profile context block (or '')."""
     try:
-        with open(profile_path, "r", encoding="utf-8") as f:
-            p = json.load(f)
+        p = await db_load_profile(tenant_id)
+        if not p:
+            return ""
+        return build_profile_context(p)
     except Exception as e:
         logger.error(f"Error loading tenant profile for {tenant_id}: {e}")
         return ""
-    return build_profile_context(p)
 
 
 # Generic, tenant-agnostic behaviour rules. Business specifics come from the

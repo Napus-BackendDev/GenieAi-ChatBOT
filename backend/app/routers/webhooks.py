@@ -373,7 +373,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
     
     # Load verified structured tenant profile (shared, tenant-agnostic builder)
     from app.services.prompt import load_tenant_profile_context, build_system_prompt, build_rag_context_message
-    profile_context = load_tenant_profile_context(tenant_id)
+    profile_context = await load_tenant_profile_context(tenant_id)
             
     full_context = ""
     if profile_context:
