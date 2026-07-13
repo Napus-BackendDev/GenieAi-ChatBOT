@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.core.redis import init_redis, close_redis
 from app.core.mongodb import init_mongo, close_mongo, is_mongo_connected
 from app.routers import webhooks, documents, bookings, auth, tenant, chat
+from app.routers import webhooks_facebook, webhooks_web
 
 # Ensure directories exist before mounting static folder
 os.makedirs("static", exist_ok=True)
@@ -87,6 +88,8 @@ app.include_router(bookings.router)
 app.include_router(auth.router)
 app.include_router(tenant.router)
 app.include_router(chat.router)
+app.include_router(webhooks_facebook.router)
+app.include_router(webhooks_web.router)
 
 @app.get("/")
 async def root():
