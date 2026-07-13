@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
 
+    # Google Sign-In: audience check for ID tokens. Blank = Google login disabled.
+    GOOGLE_CLIENT_ID: str = ""
+
     # MongoDB (optional; migration in progress). Leave MONGODB_URI blank to keep
     # using local JSON storage. Set it (in .env) to enable the MongoDB connection.
     MONGODB_URI: str = ""

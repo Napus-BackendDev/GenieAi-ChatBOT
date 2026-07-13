@@ -87,7 +87,9 @@ async def verify_google_token(token: str) -> dict | None:
             )
             if response.status_code == 200:
                 payload = response.json()
-                google_client_id = os.getenv("GOOGLE_CLIENT_ID")
+                # settings loads .env via pydantic (os.getenv can't see env_file values)
+                from app.core.config import settings
+                google_client_id = settings.GOOGLE_CLIENT_ID or os.getenv("GOOGLE_CLIENT_ID")
                 if not google_client_id:
                     logger.error("GOOGLE_CLIENT_ID not configured — refusing Google login.")
                     return None
