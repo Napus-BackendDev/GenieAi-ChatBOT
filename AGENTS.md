@@ -6,7 +6,7 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 GenieAI is a multi-tenant SaaS AI Business Assistant. Business owners upload service manuals (PDF/TXT/MD), and the system creates an AI chatbot that answers customer questions and handles appointment bookings via LINE, Facebook Messenger, or web chat.
 
-**Current state:** Single-tenant prototype working end-to-end on LINE. Auth is real (JWT + bcrypt) — see `backend/app/core/security.py`; tenant_id is derived from the token, not client-supplied. Data stored in local JSON files (`data/`) instead of MongoDB. Only LINE webhook is implemented — Facebook and web chat webhooks are stubbed in architecture docs but not built.
+**Current state:** Single-tenant prototype working end-to-end on LINE. Auth is real (JWT + bcrypt) — see `backend/app/core/security.py`; tenant_id is derived from the token, not client-supplied. Data access goes through the Mongo-first/JSON-fallback adapter `backend/app/core/db.py` (MongoDB Atlas when `MONGODB_URI` is set; local JSON files in `data/` otherwise or on Mongo failure). All three channel webhooks exist: LINE (`webhooks.py`), Facebook Messenger (`webhooks_facebook.py`), web chat (`webhooks_web.py`) — all still single-tenant via `get_active_tenant_id()`.
 
 **Checkpoint (2026-06-09):** LINE chatbot is fully functional with natural multi-bubble messaging, human-like typing delays, push message fallback, rich tenant profile (services, promotions, staff, FAQ), and hybrid RAG+CAG context engine.
 
@@ -19,7 +19,7 @@ The best code is the code you don't write. Before writing anything new, climb th
 4. Can an already-installed dependency do it? Don't add a new dependency lightly.
 5. If code is unavoidable, make it the smallest possible change / one-liner.
 
-**Reuse before rebuild** (don't duplicate): system prompt + profile context → `backend/app/services/prompt.py` (single source for `webhooks.py` & `chat.py`); LINE send → `reply_to_line`/`push_to_line`; RAG/CAG → `rag.py::retrieve_hybrid_context`; bookings → `booking_service.py`; Mongo handle → `app/core/mongodb.py::get_mongo_db`.
+**Reuse before rebuild** (don't duplicate): system prompt + profile context → `backend/app/services/prompt.py` (single source for `webhooks.py` & `chat.py`); LINE send → `reply_to_line`/`push_to_line`; non-LINE channel AI pipeline → `webhooks_web.py::generate_ai_bubbles` (imported by `webhooks_facebook.py`); RAG/CAG → `rag.py::retrieve_hybrid_context`; bookings → `booking_service.py`; persistence → `app/core/db.py` (`db_load_*`/`db_save_*`, Mongo-first + JSON fallback — never open the JSON files directly); raw Mongo handle → `app/core/mongodb.py::get_mongo_db`.
 
 **Lazy ≠ careless.** Never skip input validation, missing-data handling, error boundaries, security (signature checks, secrets in `.env`), or auth. Leave a `ponytail:` comment for any deliberate shortcut. Token hygiene: read targeted line ranges, prefer Grep/Glob, don't re-read a just-edited file, keep diffs minimal.
 
@@ -44,7 +44,7 @@ npm run build    # Production build to dist/
 npm run lint     # ESLint
 ```
 
-One-click launcher: `start.bat` at the repo root (sets up backend venv + `npm install`, starts both servers, opens browser) for non-technical users.
+One-click launcher: `start.bat` at the repo root (sets up backend venv + `npm install`, starts both servers, opens browser) for non-technical users. `.claude/launch.json` has `frontend` (npm dev, :5173) and `backend` (venv uvicorn, :8000) launch entries.
 
 ### LINE Webhook Testing
 ```bash
@@ -67,6 +67,8 @@ Production uses Upstash Redis (URL in `.env`). ChromaDB runs embedded (persisten
 
 **Routers:**
 - `webhooks.py` — LINE webhook at `/api/webhooks/line`. Receives events, processes in BackgroundTasks. Multi-bubble reply with AIS-style human pacing: `show_line_loading()` fires LINE's official "typing…" animation, then a per-bubble delay proportional to length (`_typing_seconds()`, `_HUMANIZE_PROFILES`) precedes EVERY bubble incl. the first. First bubble uses reply API (free), remaining use push API. Includes `_strip_markdown()` and `split_to_line_bubbles()` post-processors.
+- `webhooks_facebook.py` — Facebook Messenger webhook at `/api/webhooks/facebook`. GET = Meta verification handshake vs `FB_VERIFY_TOKEN`; POST verifies `X-Hub-Signature-256` HMAC vs `FB_APP_SECRET` (never skipped), processes events in BackgroundTasks via the shared `generate_ai_bubbles`, replies bubble-by-bubble via Graph `/me/messages` with `FB_PAGE_ACCESS_TOKEN` (`FB_GRAPH_API_VERSION` default `v21.0`).
+- `webhooks_web.py` — Web-chat webhook: `POST /api/webhooks/web` `{tenant_id, session_id, message}` → `{bubbles, requires_human, diagnostics}` (unauthenticated, same-origin widget). Also home of `generate_ai_bubbles()`, the single shared AI pipeline for non-LINE channels (honors human-intervention pause, strips inbound `[[HANDOFF]]`, splits via `split_to_line_bubbles`).
 - `chat.py` — `/api/chat` sandbox endpoint mirroring webhook logic but returning structured JSON (for admin dashboard testing).
 - `documents.py` — `/api/documents/upload` handles PDF/TXT/MD upload. Parses with Vision OCR, indexes into ChromaDB, and extracts structured business rules via GPT-4o-mini. `reextract_schedules` guards the profile read-modify-write with `tenant_file_lock` + atomic write + CAG cache-bust + `_validate_tenant_id`.
 - `auth.py` — `/api/auth/login` (issues `access_token` + `token_type: "bearer"`) and `/api/auth/questionnaire`. Real auth: email+bcrypt password (trust-on-first-use for legacy accounts; legacy email+phone path still accepted when no password sent); Google login also issues a token. Every tenant-data endpoint derives tenant_id from the token via `get_current_tenant`/`require_tenant` (`core/security.py`).
@@ -78,15 +80,15 @@ Production uses Upstash Redis (URL in `.env`). ChromaDB runs embedded (persisten
 - `openai_service.py` — OpenAI client. `get_embedding()` uses `text-embedding-3-small`. `chat_completion_with_tools()` uses `gpt-4o-mini` with iterative tool calling loop (max 5 iterations). `BOOKING_TOOLS` = `get_staff_on_duty` (→ `booking_service.get_staff_on_duty_sync`), `check_booking_availability`, `create_booking`.
 - `parsing.py` — `parse_pdf()` renders each PDF page as image → GPT-4o-mini Vision OCR → text. Extracts embedded images to `static/images/{tenant_id}/{doc_id}/`. Falls back to PyMuPDF text extraction on Vision API failure.
 - `schedule.py` — Deterministic parser for Thai staff work-schedule strings (day ranges `พฤหัส–อาทิตย์`, nth-weekday-of-month `สัปดาห์ที่ 2,4`, multi-shift `|`). Functions: `parse_schedule`, `is_on_duty`, `covers_datetime`, `staff_working_on`, `resolve_day`. Exists because the LLM cannot reliably reason over these schedules.
-- `booking_service.py` — Synchronous booking logic. Per-tenant conflict window (default 30 min) + min lead time. `_find_conflict` (lock-free) is called under ONE `booking_file_lock` for the check-then-write critical section (TOCTOU fix). Validates chosen staff is on-duty via `schedule.py` (reason `staff_off_duty`), validates contact (`_is_valid_email`/`_is_valid_phone`) before create, returns machine-readable reason codes (`past_date`, `under_lead_time`, `slot_taken`, `staff_off_duty`). `_parse_booking_dt` handles negative UTC offsets. `get_staff_on_duty_sync` backs the AI tool. JSON file storage.
+- `booking_service.py` — Synchronous booking logic. Per-tenant conflict window (default 30 min) + min lead time. `_find_conflict` (lock-free) is called under ONE `booking_file_lock` for the check-then-write critical section (TOCTOU fix). Validates chosen staff is on-duty via `schedule.py` (reason `staff_off_duty`), validates contact (`_is_valid_email`/`_is_valid_phone`) before create, returns machine-readable reason codes (`past_date`, `under_lead_time`, `slot_taken`, `staff_off_duty`). `_parse_booking_dt` handles negative UTC offsets. `get_staff_on_duty_sync` backs the AI tool. Persistence via `core/db.py` (`db_load_bookings`/`db_save_bookings`).
 - `redis_service.py` — Chat history management. Max 10 messages per session, 2-hour TTL.
 
-**Data storage (all local JSON — no MongoDB yet):**
-- `data/users.json` — User accounts
-- `data/documents.json` — Document metadata with page-to-image mappings
-- `data/bookings.json` — Booking records
-- `data/tenant_profile_{tenant_id}.json` — Structured business profiles (services, promotions, staff, FAQ)
-- `data/chroma/` — ChromaDB persistent vector store
+**Data storage (Mongo-first via `core/db.py`, JSON fallback):**
+`backend/app/core/db.py` is the single adapter for users, tenant profiles, documents metadata, and bookings (`db_load_users`/`db_save_users`, `db_load_profile`/`db_save_profile`, `db_load_documents`/`db_save_documents`, `db_load_bookings`/`db_save_bookings` — all async). Uses MongoDB (Motor) when `MONGODB_URI` is set and reachable; otherwise (or on any Mongo error) falls back to the local JSON files, which keep their original schemas:
+- `data/users.json` · `data/documents.json` (page-to-image mappings) · `data/bookings.json` · `data/tenant_profile_{tenant_id}.json`
+- `data/chroma/` — ChromaDB persistent vector store (unchanged, not in the adapter)
+- `requirements.txt`'s `motor`/`pymongo` must be installed in the venv.
+- **Event-loop gotcha:** inside uvicorn routes, `await` the async `db_*` functions directly. NEVER call `booking_service._load_bookings`/`_save_bookings` from async code — they use `run_until_complete` and crash with "event loop already running". Those sync wrappers exist only for tests/thread contexts.
 
 ### Frontend (`frontend/src/`)
 
@@ -148,13 +150,18 @@ Tenant isolation is achieved through `tenant_id` parameter filtering at every la
 - JSON files: filtered in-memory by `tenant_id` field
 - Static images: path `static/images/{tenant_id}/{doc_id}/`
 
-**Current limitation:** LINE webhook uses `get_active_tenant_id()` which reads the first user from `users.json` — effectively single-tenant. Architecture doc specifies `/api/webhooks/line/{tenant_id}` but this isn't implemented yet.
+**Current limitation:** all channel webhooks (LINE, Facebook, web) resolve the tenant via `get_active_tenant_id()` (first user) — effectively single-tenant. `ponytail:` markers in `webhooks_facebook.py`/`webhooks_web.py` mark where per-channel tenant mapping (e.g. FB Page ID → tenant_id, signed widget key) goes when multi-tenant routing ships.
 
 ## Environment Variables (`.env` in `backend/`)
 
 | Variable | Purpose |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI API (embeddings + chat + vision OCR) |
+| `MONGODB_URI` | MongoDB Atlas connection (optional — blank/unreachable → JSON fallback) |
+| `FB_VERIFY_TOKEN` | Facebook webhook GET verification handshake |
+| `FB_APP_SECRET` | Facebook `X-Hub-Signature-256` HMAC verification |
+| `FB_PAGE_ACCESS_TOKEN` | Facebook Graph Send API |
+| `FB_GRAPH_API_VERSION` | Optional, default `v21.0` |
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Messaging API |
 | `LINE_CHANNEL_SECRET` | LINE webhook signature verification |
 | `REDIS_URL` | Redis connection (supports `rediss://` for TLS) |
@@ -173,7 +180,7 @@ Tenant isolation is achieved through `tenant_id` parameter filtering at every la
 - **Human handoff:** the AI emits a `[[HANDOFF]]` marker to escalate (stripped before sending). `chat.py`/`webhooks.py` also strip `[[HANDOFF]]` from inbound customer text (prompt-injection guard). The admin controls the AI from the Dashboard via `POST /api/chat/pause` and `/api/chat/resume`. A customer emoji does NOT trigger handoff, and a plain text reply does NOT resume the AI.
 - **Auth (real, enforced):** `core/security.py` provides bcrypt `hash_password`/`verify_password`, PyJWT `create_access_token` (HS256, `sub`=tenant_id), a `get_current_tenant` dependency (401 on missing/invalid/expired `Authorization: Bearer` header) and a `require_tenant` helper (403 when a path/query tenant_id ≠ the token's). Every tenant-data endpoint (bookings, chat [all 5 routes], documents list/upload/delete/reextract, tenant profile/save/upload-image/verify-line, auth/questionnaire) derives tenant_id FROM THE TOKEN — a client-supplied tenant_id can no longer reach another tenant. Exempt by design: `/api/auth/login`, `/api/webhooks/*` (LINE signature), `/` health, `/static`, and the UUID-keyed `/api/documents/upload/status/{job_id}`.
 - **Tenant-scoped deletes:** `rag.py::delete_document` checks doc ownership BEFORE deleting and scopes the ChromaDB delete by tenant (`where={"$and": [{document_id}, {tenant_id}]}` — Chroma needs `$and`).
-- **MongoDB:** connection is wired in `backend/app/core/mongodb.py` (Motor, optional — no-op when `MONGODB_URI` is blank; use `get_mongo_db()`). Data still lives in JSON until the migration; don't re-scaffold the connection.
+- **MongoDB:** connection is wired in `backend/app/core/mongodb.py` (Motor, optional — no-op when `MONGODB_URI` is blank; use `get_mongo_db()`). All data access goes through the `core/db.py` adapter (Mongo-first, JSON fallback); don't re-scaffold the connection or bypass the adapter.
 - **Booking creation only happens through AI function calling** — there is no direct REST endpoint to create bookings. The AI must call `check_booking_availability` then `create_booking`.
 - **PDF parsing uses Vision OCR by default** (renders page as image → GPT-4o-mini), not text extraction. This is expensive but handles Thai text and tables well.
 - **CAG mode injects the entire document corpus into the system prompt**. This only works when corpus is under ~15K tokens (~10-12K words).
@@ -186,9 +193,8 @@ Tenant isolation is achieved through `tenant_id` parameter filtering at every la
 ## Planned Work
 
 - **Ollama migration:** Replace OpenAI (gpt-4o-mini + text-embedding-3-small) with local LLM via Ollama (e.g. qwen2.5:7b + nomic-embed-text). Requires adapting RAG/CAG thresholds for smaller context windows.
-- **Multi-tenant LINE routing:** Change webhook from `/api/webhooks/line` to `/api/webhooks/line/{tenant_id}` so multiple businesses can use separate LINE channels.
-- **MongoDB migration:** Replace JSON file storage with MongoDB for production scalability.
-- **Facebook & Web Chat:** Implement additional messaging channel webhooks.
+- **Multi-tenant channel routing:** all webhooks (LINE, Facebook, web) still resolve tenant via `get_active_tenant_id()` — add per-channel tenant mapping (LINE path param, FB Page ID, signed widget key; see `ponytail:` markers).
+- **MongoDB remainder:** adapter layer is done (`core/db.py`). Left: whitelist the server IP in Atlas (ops step) and migrate profile-image/upload file paths, which are still file-based.
 
 ## Custom Rules & Developer Preferences
 

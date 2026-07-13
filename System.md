@@ -11,7 +11,7 @@ GenieAI คือระบบผู้ช่วยธุรกิจอัจฉ
 * **Backend**: ขับเคลื่อนด้วย FastAPI (Python 3.11) ทำหน้าที่ประมวลผลข้อมูลเอกสารด้วย OCR, จัดการเวกเตอร์ฐานข้อมูล (ChromaDB), บริหารประวัติแชต (Redis) และเชื่อมต่อกับ OpenAI (GPT-4o-mini)
 * **Frontend**: พัฒนาด้วย React 19, Vite 8, HeroUI Component Library และ Tailwind CSS v4 ดีไซน์สวยงามระดับพรีเมียมด้วยธีม Glassmorphism
 * **Database & Cache**: 
-  * ใช้ **Local JSON files** (`data/`) เป็นตัวเก็บข้อมูลถาวรสำหรับการตั้งค่าโปรไฟล์ร้านค้า การจอง และผู้ใช้ (เตรียมการเปลี่ยนไปใช้ MongoDB ในอนาคต)
+  * ใช้ **MongoDB (Atlas) เป็นหลักผ่านอะแดปเตอร์ `backend/app/core/db.py`** สำหรับผู้ใช้ โปรไฟล์ร้านค้า เมทาดาทาเอกสาร และการจอง — หากไม่ได้ตั้ง `MONGODB_URI` หรือเชื่อมต่อ Atlas ไม่ได้ ระบบจะ fallback ไปใช้ **Local JSON files** (`data/`) โดยอัตโนมัติ
   * ใช้ **Redis** สำหรับการเก็บข้อมูลประวัติการสนทนาชั่วคราวและแคชโปรไฟล์ร้านค้า
   * ใช้ **ChromaDB (Embedded)** สำหรับเก็บข้อความเวกเตอร์จากเอกสารคู่มือ
 
@@ -33,7 +33,9 @@ GenieAI คือระบบผู้ช่วยธุรกิจอัจฉ
 │   │   │   ├── chat.py        # แซนด์บ็อกซ์สำหรับทดสอบการสนทนาของ AI
 │   │   │   ├── documents.py   # จัดการอัปโหลดและประมวลผลคู่มือ
 │   │   │   ├── tenant.py      # จัดการข้อมูลร้านค้า (Profile)
-│   │   │   └── webhooks.py    # LINE webhook รับส่งข้อความกับบอต
+│   │   │   ├── webhooks.py    # LINE webhook รับส่งข้อความกับบอต
+│   │   │   ├── webhooks_facebook.py # Facebook Messenger webhook (HMAC + Graph Send API)
+│   │   │   └── webhooks_web.py      # Web-chat webhook (+ generate_ai_bubbles pipeline กลาง)
 │   │   ├── services/          # ตรรกะการประมวลผล RAG/CAG และฟังก์ชันจอง
 │   │   │   ├── booking_service.py # ตรวจเช็คเวลาชนและเขียนไฟล์จอง
 │   │   │   ├── openai_service.py  # บริการคุยกับ GPT และรันเครื่องมืออัตโนมัติ
