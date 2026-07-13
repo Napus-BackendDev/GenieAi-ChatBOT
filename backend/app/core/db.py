@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import threading
-from app.core.mongodb import get_mongo_db, is_mongo_connected
+from app.core.mongodb import get_mongo_db
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,24 +27,29 @@ DOCUMENTS_FILE_PATH = "data/documents.json"
 def _ensure_dir_for_file(filepath: str) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
+def _clean_mongo_doc(doc: dict) -> dict:
+    cleaned = dict(doc)
+    cleaned.pop("_id", None)
+    return cleaned
+
+def _mongo_db_or_none():
+    return get_mongo_db()
+
 # ==========================================
 # 1. Users Module (Collection: users)
 # ==========================================
 
 async def db_load_users() -> list[dict]:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
+            # ponytail: Mongo is the primary store when configured; JSON below remains the fallback.
             cursor = db.users.find({})
-            users = await cursor.to_list(length=10000)
-            for u in users:
-                if "_id" in u:
-                    del u["_id"]
-            return users
+            return [_clean_mongo_doc(u) for u in await cursor.to_list(length=10000)]
         except Exception as e:
             logger.error(f"Error loading users from MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: JSON fallback keeps local/dev installs working without MongoDB.
     file_path = _get_users_file_path()
     with _users_lock:
         _ensure_dir_for_file(file_path)
@@ -60,17 +65,18 @@ async def db_load_users() -> list[dict]:
             return []
 
 async def db_save_users(users: list[dict]) -> None:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
-            # Perform bulk upsert or insert
+            # ponytail: Store the same list shape in Mongo; no extra user model layer.
             for user in users:
-                await db.users.replace_one({"tenant_id": user["tenant_id"]}, user, upsert=True)
+                if "tenant_id" in user:
+                    await db.users.replace_one({"tenant_id": user["tenant_id"]}, user, upsert=True)
             return
         except Exception as e:
             logger.error(f"Error saving users to MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: JSON fallback is still authoritative when Mongo is absent or errors.
     file_path = _get_users_file_path()
     with _users_lock:
         _ensure_dir_for_file(file_path)
@@ -93,18 +99,17 @@ def _get_profile_path(tenant_id: str) -> str:
         return f"data/tenant_profile_{tenant_id}.json"
 
 async def db_load_profile(tenant_id: str) -> dict:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
+            # ponytail: Mongo profile lookup mirrors the tenant_profile_{tenant_id}.json file.
             profile = await db.tenant_profiles.find_one({"tenant_id": tenant_id})
             if profile:
-                if "_id" in profile:
-                    del profile["_id"]
-                return profile
+                return _clean_mongo_doc(profile)
         except Exception as e:
             logger.error(f"Error loading profile {tenant_id} from MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: Missing Mongo or missing Mongo profile falls back to the existing JSON file.
     file_path = _get_profile_path(tenant_id)
     with _tenant_lock:
         if not os.path.exists(file_path):
@@ -119,15 +124,16 @@ async def db_load_profile(tenant_id: str) -> dict:
 async def db_save_profile(tenant_id: str, profile_data: dict) -> None:
     # Ensure tenant_id is in the profile document for MongoDB structure
     profile_data["tenant_id"] = tenant_id
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
+            # ponytail: Upsert the existing profile dict directly; validation stays in routers/services.
             await db.tenant_profiles.replace_one({"tenant_id": tenant_id}, profile_data, upsert=True)
             return
         except Exception as e:
             logger.error(f"Error saving profile {tenant_id} to MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: JSON fallback preserves the current tenant profile file contract.
     file_path = _get_profile_path(tenant_id)
     with _tenant_lock:
         _ensure_dir_for_file(file_path)
@@ -142,19 +148,16 @@ async def db_save_profile(tenant_id: str, profile_data: dict) -> None:
 # ==========================================
 
 async def db_load_bookings() -> list[dict]:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
+            # ponytail: Mongo returns the same list-of-dicts shape as bookings.json.
             cursor = db.bookings.find({})
-            bookings = await cursor.to_list(length=10000)
-            for b in bookings:
-                if "_id" in b:
-                    del b["_id"]
-            return bookings
+            return [_clean_mongo_doc(b) for b in await cursor.to_list(length=10000)]
         except Exception as e:
             logger.error(f"Error loading bookings from MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: JSON fallback keeps booking creation/listing working without MongoDB.
     file_path = settings.BOOKINGS_JSON_PATH
     with _bookings_lock:
         _ensure_dir_for_file(file_path)
@@ -170,11 +173,10 @@ async def db_load_bookings() -> list[dict]:
             return []
 
 async def db_save_bookings(bookings: list[dict]) -> None:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
-            # Clear and replace or do replacement loop
-            # To keep clean synchronization, clear and insert all, or upsert by booking_id
+            # ponytail: Treat Mongo as a mirror of the existing full-list save contract.
             for b in bookings:
                 if "booking_id" in b:
                     await db.bookings.replace_one({"booking_id": b["booking_id"]}, b, upsert=True)
@@ -185,7 +187,7 @@ async def db_save_bookings(bookings: list[dict]) -> None:
         except Exception as e:
             logger.error(f"Error saving bookings to MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: On Mongo failure, write through to the legacy JSON file instead of crashing.
     file_path = settings.BOOKINGS_JSON_PATH
     with _bookings_lock:
         _ensure_dir_for_file(file_path)
@@ -200,19 +202,16 @@ async def db_save_bookings(bookings: list[dict]) -> None:
 # ==========================================
 
 async def db_load_documents() -> list[dict]:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
+            # ponytail: Mongo document metadata keeps the data/documents.json schema.
             cursor = db.documents.find({})
-            docs = await cursor.to_list(length=10000)
-            for d in docs:
-                if "_id" in d:
-                    del d["_id"]
-            return docs
+            return [_clean_mongo_doc(d) for d in await cursor.to_list(length=10000)]
         except Exception as e:
             logger.error(f"Error loading documents from MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: JSON fallback keeps document metadata available without MongoDB.
     file_path = settings.DOCUMENTS_JSON_PATH
     with _documents_lock:
         _ensure_dir_for_file(file_path)
@@ -228,20 +227,21 @@ async def db_load_documents() -> list[dict]:
             return []
 
 async def db_save_documents(docs: list[dict]) -> None:
-    if is_mongo_connected():
+    db = _mongo_db_or_none()
+    if db is not None:
         try:
-            db = get_mongo_db()
+            # ponytail: Upsert existing metadata dicts directly; indexing logic remains in rag.py.
             for d in docs:
-                if "id" in d:
-                    await db.documents.replace_one({"id": d["id"]}, d, upsert=True)
+                if "document_id" in d:
+                    await db.documents.replace_one({"document_id": d["document_id"]}, d, upsert=True)
             # Remove any docs in MongoDB that are no longer in the list (e.g. deleted)
-            current_ids = [d["id"] for d in docs if "id" in d]
-            await db.documents.delete_many({"id": {"$nin": current_ids}})
+            current_ids = [d["document_id"] for d in docs if "document_id" in d]
+            await db.documents.delete_many({"document_id": {"$nin": current_ids}})
             return
         except Exception as e:
             logger.error(f"Error saving documents to MongoDB: {e}")
 
-    # Fallback to local JSON
+    # ponytail: On Mongo failure, keep writing the legacy documents JSON file.
     file_path = settings.DOCUMENTS_JSON_PATH
     with _documents_lock:
         _ensure_dir_for_file(file_path)

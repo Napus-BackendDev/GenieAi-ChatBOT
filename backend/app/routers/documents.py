@@ -4,11 +4,13 @@ import tempfile
 import logging
 import uuid
 import asyncio
+import inspect
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from app.services.parsing import parse_pdf
-from app.services.rag import index_document, _load_documents_meta, delete_document
+from app.services.rag import index_document, delete_document
 from app.routers.tenant import tenant_file_lock, _get_profile_path, _validate_tenant_id
 from app.core.security import get_current_tenant, require_tenant
+from app.core.db import db_load_documents
 
 logger = logging.getLogger(__name__)
 import json
@@ -22,6 +24,11 @@ UPLOAD_JOB_TTL = 3600  # seconds
 # WEAK references to tasks, so without this a long-running OCR job can be garbage
 # collected mid-run (leaving the job stuck on "processing" forever).
 _upload_tasks: set = set()
+
+
+async def _load_documents_meta() -> list[dict]:
+    # ponytail: Use the shared Mongo/JSON adapter here instead of reaching into rag.py.
+    return await db_load_documents()
 
 
 def _job_key(tenant_id: str, job_id: str) -> str:
@@ -238,7 +245,8 @@ async def list_documents(tenant_id: str = Depends(get_current_tenant)):
     Filtering by tenant_id prevents cross-tenant leakage and wrong counts.
     """
     try:
-        docs = _load_documents_meta()
+        res = _load_documents_meta()
+        docs = await res if inspect.isawaitable(res) else res
         # Strip detailed page contents for listing, filtered to this tenant only
         cleaned_docs = []
         for doc in docs:
@@ -344,4 +352,3 @@ async def reextract_schedules(tenant_id: str = Depends(require_tenant)):
             logger.warning(f"Failed to clear Redis CAG profile cache: {cache_err}")
 
     return {"status": "success", "updated_count": updated_count}
-
