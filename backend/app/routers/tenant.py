@@ -274,15 +274,12 @@ async def verify_line(
 
     # Fall back to the tenant's stored token when none supplied.
     if not access_token:
-        file_path = _get_profile_path(tenant_id)
         with tenant_file_lock:
-            if os.path.exists(file_path):
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        saved = json.load(f)
-                    access_token = str(saved.get("line_channel_access_token") or "").strip()
-                except Exception as read_err:
-                    logger.warning(f"Could not read tenant profile for LINE verify: {read_err}")
+            try:
+                saved = await db_load_profile(tenant_id)
+                access_token = str(saved.get("line_channel_access_token") or "").strip()
+            except Exception as read_err:
+                logger.warning(f"Could not read tenant profile for LINE verify: {read_err}")
 
     if not access_token:
         return {"valid": False, "error": "ยังไม่ได้ใส่ Channel Access Token"}

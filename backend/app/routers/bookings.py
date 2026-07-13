@@ -6,10 +6,13 @@ from app.core.security import get_current_tenant
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
-# Keep the helper definition at module level so test monkeypatch works
+# Keep the helper definition at module level so test monkeypatch works.
+# Returns the async adapter's coroutine directly — the routes' isawaitable branch
+# awaits it on the running loop (the old sync wrapper called run_until_complete
+# inside uvicorn's loop → "This event loop is already running" → 500).
 def _load_bookings():
-    from app.services.booking_service import _load_bookings as service_load
-    return service_load()
+    from app.core.db import db_load_bookings
+    return db_load_bookings()
 
 @router.get("")
 async def list_bookings(tenant_id: str = Depends(get_current_tenant)):
@@ -60,9 +63,11 @@ async def cancel_booking(booking_id: str, tenant_id: str = Depends(get_current_t
         if not found:
             raise HTTPException(status_code=404, detail="Booking not found.")
             
-        # Write back changes
-        from app.services.booking_service import _save_bookings
-        _save_bookings(new_bookings)
+        # Write back changes via the async adapter (same event-loop reasoning as _load_bookings)
+        from app.core.db import db_save_bookings
+        save_res = db_save_bookings(new_bookings)
+        if inspect.isawaitable(save_res):
+            await save_res
         return {"status": "success", "message": f"Successfully cancelled booking: {booking_id}"}
     except HTTPException:
         raise

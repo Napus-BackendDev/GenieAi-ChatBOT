@@ -115,7 +115,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
 
         setBookings(Array.isArray(realBookings) ? realBookings : []);
         setDocumentsCount(Array.isArray(docs) ? docs.length : 0);
-        setLineConnected(!!(profile && profile.line_channel_access_token));
+        setLineConnected(!!(profile && profile.line_configured));
         setProfileStaff((profile && Array.isArray(profile.staff)) ? profile.staff : []);
       } catch (e) {
         console.error("Failed to load dashboard statistics:", e);

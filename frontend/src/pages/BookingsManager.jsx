@@ -105,7 +105,9 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
       setLoading(true);
       const response = await fetch(`/api/bookings?tenant_id=${tenantId}`);
       const data = await response.json();
-      setBookings(data);
+      // Guard: a backend error returns {detail} — never feed a non-array into .filter (blank-screen crash)
+      setBookings(Array.isArray(data) ? data : []);
+      if (!Array.isArray(data)) setError(t.loadError);
     } catch (e) {
       console.error("Failed to fetch bookings:", e);
       setError(t.loadError);
@@ -272,9 +274,9 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
   // Apply search and status filters on daily bookings
   const filteredBookings = dailyBookings.filter(booking => {
     const matchSearch = 
-      booking.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      booking.phone_number.includes(searchTerm) ||
-      booking.service_topic.toLowerCase().includes(searchTerm.toLowerCase());
+      (booking.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (booking.phone_number || '').includes(searchTerm) ||
+      (booking.service_topic || '').toLowerCase().includes(searchTerm.toLowerCase());
       
     const upcoming = isUpcoming(booking.booking_datetime);
     
