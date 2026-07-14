@@ -251,6 +251,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const [showRaw, setShowRaw] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
   const [showAutoFillBanner, setShowAutoFillBanner] = useState(false);
+  const [progressMessage, setProgressMessage] = useState('🤖 AI กำลังอ่านคู่มือของคุณในหลังบ้าน...');
 
   const [lineConfigured, setLineConfigured] = useState(false);
   const [facebookConfigured, setFacebookConfigured] = useState(false);
@@ -356,6 +357,29 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
       try {
         const res = await fetch(`/api/documents/upload/status/${jobId}`);
         const data = await res.json().catch(() => ({ status: 'error' }));
+        
+        if (data.extracted_json) {
+          const ext = data.extracted_json;
+          if (ext.company_name && !companyName) setCompanyName(ext.company_name);
+          if (ext.business_hours && !businessHours) setBusinessHours(ext.business_hours);
+          if (ext.contact_number && !contactNumber) setContactNumber(ext.contact_number);
+          if (ext.services && ext.services.length && !services.length) setServices(ext.services);
+          if (ext.promotions && ext.promotions.length && !promotions.length) setPromotions(ext.promotions);
+          if (ext.staff && ext.staff.length && !staff.length) setStaff(ext.staff);
+          if (ext.faq && ext.faq.length && !faq.length) setFaq(ext.faq);
+          if (ext.custom_rules && ext.custom_rules.length && !customRules.length) setCustomRules(ext.custom_rules);
+        }
+
+        if (data.progress === 'parsing_done') {
+          setProgressMessage('🤖 AI อ่านข้อความจากคู่มือเสร็จแล้ว เริ่มวิเคราะห์ข้อมูล...');
+        } else if (data.progress === 'basic_done') {
+          setProgressMessage('🤖 AI วิเคราะห์ข้อมูลธุรกิจพื้นฐานเสร็จสิ้น...');
+        } else if (data.progress === 'services_done') {
+          setProgressMessage('🤖 AI ดึงข้อมูลรายการบริการเสร็จเรียบร้อย...');
+        } else if (data.progress === 'staff_done') {
+          setProgressMessage('🤖 AI ดึงตารางเวลางานทีมงานพนักงานแล้ว...');
+        }
+
         if (data.status === 'done') {
           clearInterval(pollRef.current);
           pollRef.current = null;
@@ -563,7 +587,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
             <div className="flex items-center gap-3">
               <RefreshCw size={18} className="text-[#2B6CB0] animate-spin shrink-0" />
               <div>
-                <h4 className="text-xs font-bold text-blue-900 dark:text-blue-200">🤖 AI กำลังอ่านคู่มือของคุณในหลังบ้าน...</h4>
+                <h4 className="text-xs font-bold text-blue-900 dark:text-blue-200">{progressMessage}</h4>
                 <p className="text-[10px] text-blue-500/80 mt-0.5">คุณสามารถตั้งค่าขั้นตอนอื่นต่อได้ทันที ข้อมูลจะถูกวิเคราะห์อัตโนมัติในแถบถัดไป</p>
               </div>
             </div>

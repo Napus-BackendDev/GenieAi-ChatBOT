@@ -53,8 +53,8 @@ async def _write_job_status(tenant_id: str, job_id: str, payload: dict) -> None:
 
 async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_id: str) -> None:
     """
-    Background worker: parse -> index -> extract, then record the result in Redis.
-    Any failure is captured as status='error' so the job never silently vanishes.
+    Background worker: parse -> index -> progressive rules extraction,
+    writing intermediate results to Redis to allow non-blocking UI populating.
     """
     try:
         # 1. Parse text and extract images
@@ -67,10 +67,51 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
         # 3. Concatenate all text pages for rule extraction
         full_raw_text = "\n\n".join([page.get("text", "") for page in parsed_doc.get("pages", [])])
 
-        # 4. Extract structured profile using OpenAI
-        extracted_json = await extract_business_rules_from_text(full_raw_text)
+        # Write parsing done status
+        await _write_job_status(tenant_id, job_id, {
+            "status": "processing",
+            "progress": "parsing_done",
+            "document_name": filename,
+            "extracted_json": {}
+        })
 
-        # 5. Clear Redis cache for the tenant CAG/RAG profile
+        extracted_json = {}
+
+        # 4.1. Extract basic details (company_name, business_hours, contact_number)
+        basic_info = await extract_part_from_text(full_raw_text, "basic_info")
+        extracted_json.update(basic_info)
+        await _write_job_status(tenant_id, job_id, {
+            "status": "processing",
+            "progress": "basic_done",
+            "document_name": filename,
+            "extracted_json": extracted_json.copy()
+        })
+
+        # 4.2. Extract services
+        services_info = await extract_part_from_text(full_raw_text, "services")
+        extracted_json.update(services_info)
+        await _write_job_status(tenant_id, job_id, {
+            "status": "processing",
+            "progress": "services_done",
+            "document_name": filename,
+            "extracted_json": extracted_json.copy()
+        })
+
+        # 4.3. Extract staff
+        staff_info = await extract_part_from_text(full_raw_text, "staff")
+        extracted_json.update(staff_info)
+        await _write_job_status(tenant_id, job_id, {
+            "status": "processing",
+            "progress": "staff_done",
+            "document_name": filename,
+            "extracted_json": extracted_json.copy()
+        })
+
+        # 4.4. Extract promotions, FAQs, and custom rules
+        rest_info = await extract_part_from_text(full_raw_text, "rest")
+        extracted_json.update(rest_info)
+
+        # Clear Redis cache for the tenant CAG/RAG profile
         from app.core.redis import get_redis
         try:
             redis_client = get_redis()
@@ -80,6 +121,7 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
 
         await _write_job_status(tenant_id, job_id, {
             "status": "done",
+            "progress": "all_done",
             "document_id": parsed_doc["document_id"],
             "document_name": filename,
             "raw_text": full_raw_text,
@@ -98,6 +140,83 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
                 os.remove(tmp_path)
             except Exception as e:
                 logger.error(f"Failed to remove temp file {tmp_path} for job {job_id}: {e}")
+
+async def extract_part_from_text(text: str, part: str) -> dict:
+    """
+    Uses OpenAI to extract a specific subset of business profile details.
+    Allows progressive streaming updates to the frontend client.
+    """
+    from app.services.openai_service import openai_client
+    
+    if part == "basic_info":
+        prompt = (
+            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
+            "หน้าที่ของคุณคือการอ่านข้อความที่ให้มา และดึงข้อมูลของธุรกิจออกเป็นโครงสร้าง JSON ดังนี้เท่านั้น:\n"
+            "{\n"
+            '  "company_name": "ชื่อบริษัท/ร้านค้า (ถ้ามี)",\n'
+            '  "business_hours": "เวลาเปิด-ปิดทำการ เช่น เปิดทุกวัน 09:00 - 20:00 น.",\n'
+            '  "contact_number": "เบอร์ติดต่อร้าน (ถ้ามี)"\n'
+            "}\n"
+            "ห้ามแต่งข้อมูลขึ้นมาเองเด็ดขาด หากไม่มีระบุให้ตอบว่าง (\"\"). ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
+            f"ข้อความ:\n{text}"
+        )
+    elif part == "services":
+        prompt = (
+            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
+            "หน้าที่ของคุณคือการดึงรายการบริการหรือสินค้าทั้งหมดออกมาเป็นโครงสร้าง JSON:\n"
+            "{\n"
+            '  "services": [\n'
+            '    {"name": "ชื่อบริการ/สินค้า", "price": 300, "duration": 30}\n'
+            '  ]\n'
+            "}\n"
+            "หมายเหตุ: price สามารถเป็นตัวเลข หรือข้อความการประมาณราคา เช่น 'เริ่มต้น 600', 'ประมาณ 1000-2000' (ระบุเป็น string เสมอ). "
+            "duration ให้กำหนดเป็น 30 เสมอ. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
+            f"ข้อความ:\n{text}"
+        )
+    elif part == "staff":
+        prompt = (
+            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
+            "หน้าที่ของคุณคือการดึงข้อมูลพนักงานหรือแพทย์ทั้งหมดออกมาเป็นโครงสร้าง JSON:\n"
+            "{\n"
+            '  "staff": [\n'
+            '    {"name": "ชื่อพนักงาน/แพทย์", "role": "ตำแหน่ง เช่น ทันตแพทย์จัดฟัน", "specialties": ["ความเชี่ยวชาญย่อย"], "experience": "ประสบการณ์", "schedule": "ตารางเวลาทำงาน เช่น อังคาร–พุธ 09:00–15:00"}\n'
+            '  ]\n'
+            "}\n"
+            "ตารางเวลาให้ใช้การดึงชื่อวันภาษาไทยตามที่ระบุในคู่มือ ห้ามเดาข้อมูล. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
+            f"ข้อความ:\n{text}"
+        )
+    else:  # rest
+        prompt = (
+            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
+            "หน้าที่ของคุณคือการดึงโปรโมชัน คำถามที่พบบ่อย (FAQ) และนโยบาย/กฎเพิ่มเติม ออกมาเป็นโครงสร้าง JSON:\n"
+            "{\n"
+            '  "promotions": [\n'
+            '    {"name": "ชื่อโปรโมชัน", "description": "รายละเอียด", "discount": "ส่วนลด", "valid_until": "วันหมดอายุ YYYY-MM-DD หรือเว้นว่างหากไม่ระบุ", "conditions": "เงื่อนไข"}\n'
+            '  ],\n'
+            '  "faq": [\n'
+            '    {"question": "คำถาม", "answer": "คำตอบสำหรับลูกค้า"}\n'
+            '  ],\n'
+            '  "custom_rules": [\n'
+            '    {"category": "หมวดหมู่กฎ/นโยบาย", "rule": "รายละเอียดกฎเกณฑ์"}\n'
+            '  ]\n'
+            "}\n"
+            "หมายเหตุ: ห้ามเดาวันหมดอายุของโปรโมชัน หากไม่ระบุให้เว้นว่างเป็น \"\" เสมอ. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
+            f"ข้อความ:\n{text}"
+        )
+
+    try:
+        response = await openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0
+        )
+        raw_content = response.choices[0].message.content.strip()
+        if raw_content.startswith("```"):
+            raw_content = raw_content.replace("```json", "").replace("```", "").strip()
+        return json.loads(raw_content)
+    except Exception as e:
+        logger.error(f"Failed to extract rules for part {part}: {e}")
+        return {}
 
 async def extract_business_rules_from_text(text: str) -> dict:
     """
