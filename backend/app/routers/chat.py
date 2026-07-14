@@ -1,4 +1,3 @@
-import os
 import json
 import logging
 from datetime import datetime
@@ -153,7 +152,7 @@ async def get_line_user_profile(user_id: str, tenant_id: str) -> dict:
             pass
             
     # If not cached, fetch from LINE API
-    access_token, _ = get_tenant_line_credentials(tenant_id)
+    access_token, _ = await get_tenant_line_credentials(tenant_id)
     url = f"https://api.line.me/v2/bot/profile/{user_id}"
     headers = {
         "Authorization": f"Bearer {access_token}"
