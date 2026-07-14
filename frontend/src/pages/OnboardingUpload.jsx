@@ -461,7 +461,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         const d = await res.json().catch(() => ({}));
         throw new Error(d.detail || t.saveFailed);
       }
-      setStep(10);
+      setStep(9);
     } catch (err) {
       setError(err.message === t.saveFailed ? t.saveFailed : t.netErr);
     } finally {
@@ -479,8 +479,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     { n: 6, title: t.s6, sub: t.s6sub },
     { n: 7, title: t.s7, sub: t.s7sub },
     { n: 8, title: t.s8, sub: t.s8sub },
-    { n: 9, title: t.s9, sub: t.s9sub },
-    { n: 10, title: t.s10, sub: t.s10sub }
+    { n: 9, title: t.s9, sub: t.s9sub }
   ];
   const pct = Math.round((step / steps.length) * 100);
   const cur = steps[step - 1];
