@@ -256,12 +256,9 @@ function App() {
   };
 
   const handleOnboardingComplete = () => {
-    if (user) {
-      setLoading(true);
-      checkUserOnboardingStatus(user);
-    } else {
-      setOnboardingState('dashboard');
-    }
+    window.history.pushState(null, '', '/overview');
+    setOnboardingState('dashboard');
+    setActiveTab('overview');
   };
 
   const handleLogout = () => {
