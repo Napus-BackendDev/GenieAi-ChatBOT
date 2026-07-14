@@ -203,7 +203,12 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
             # Live flags still come from Redis (short-lived by nature)
             requires_human = await redis_client.exists(f"human_intervention:{tenant_id}:{s_id}")
             unread_val = await redis_client.get(f"unread:{tenant_id}:{s_id}")
-            unread_count = int(unread_val.decode("utf-8")) if unread_val else 0
+            # Redis runs with decode_responses=True, so values come back as str.
+            # Guard for bytes too in case that config ever changes (calling .decode
+            # on the already-decoded str is what crashed this whole endpoint).
+            if isinstance(unread_val, bytes):
+                unread_val = unread_val.decode("utf-8")
+            unread_count = int(unread_val) if unread_val else 0
 
             real_chats.append({
                 "id": s_id,
