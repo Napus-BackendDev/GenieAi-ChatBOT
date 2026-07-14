@@ -266,50 +266,40 @@ def _typing_seconds(text: str, params: dict) -> float:
     return max(params["type_min"], min(params["type_cap"], t))
 
 
-def get_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
+async def get_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
     """
     Retrieves the LINE credentials (access_token, channel_secret) for a specific tenant.
     Falls back to settings.LINE_CHANNEL_ACCESS_TOKEN and settings.LINE_CHANNEL_SECRET.
     """
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if os.path.exists(profile_path):
-        try:
-            with open(profile_path, "r", encoding="utf-8") as f:
-                profile = json.load(f)
-                token = profile.get("line_channel_access_token")
-                secret = profile.get("line_channel_secret")
-                if token and secret:
-                    return token, secret
-        except Exception as e:
-            logger.error(f"Error loading tenant credentials for {tenant_id}: {e}")
+    try:
+        from app.core.db import db_load_profile
+        profile = await db_load_profile(tenant_id)
+        if profile:
+            token = profile.get("line_channel_access_token")
+            secret = profile.get("line_channel_secret")
+            if token and secret:
+                return token, secret
+    except Exception as e:
+        logger.error(f"Error loading tenant credentials for {tenant_id}: {e}")
     
     # Fallback to default config env values
     return settings.LINE_CHANNEL_ACCESS_TOKEN, settings.LINE_CHANNEL_SECRET
 
-def get_strict_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
+
+async def get_strict_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
     """
     Resolves LINE credentials STRICTLY per-tenant for the multi-tenant webhook route.
-
-    Unlike get_tenant_line_credentials (which falls back to the global env secret
-    for the legacy single-tenant `/line` route), this returns (None, None) when the
-    tenant has no profile or no configured per-tenant secret/token. Falling back to
-    the GLOBAL secret here would let a signature forged with the global secret be
-    accepted for a victim tenant, so the caller must reject such requests instead.
     """
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if not os.path.exists(profile_path):
-        return None, None
     try:
-        with open(profile_path, "r", encoding="utf-8") as f:
-            profile = json.load(f)
+        from app.core.db import db_load_profile
+        profile = await db_load_profile(tenant_id)
+        if profile:
+            token = profile.get("line_channel_access_token")
+            secret = profile.get("line_channel_secret")
+            if token and secret:
+                return token, secret
     except Exception as e:
         logger.error(f"Error loading tenant credentials for {tenant_id}: {e}")
-        return None, None
-
-    token = profile.get("line_channel_access_token")
-    secret = profile.get("line_channel_secret")
-    if token and secret:
-        return token, secret
     return None, None
 
 async def handle_line_event(event: dict, base_url: str, tenant_id: str = "default") -> None:
@@ -329,7 +319,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
     Core handler for processing a LINE text event.
     """
     # Retrieve LINE access token for this tenant
-    access_token, _ = get_tenant_line_credentials(tenant_id)
+    access_token, _ = await get_tenant_line_credentials(tenant_id)
 
     event_type = event.get("type")
     if event_type != "message":
@@ -537,7 +527,7 @@ async def line_webhook(
     Fallback endpoint for incoming LINE webhook events (routes to active tenant).
     """
     active_tenant_id = get_active_tenant_id()
-    _, secret = get_tenant_line_credentials(active_tenant_id)
+    _, secret = await get_tenant_line_credentials(active_tenant_id)
     
     body = await request.body()
     body_str = body.decode("utf-8")
@@ -575,7 +565,7 @@ async def line_webhook_tenant(
     # Resolve credentials STRICTLY per-tenant. No fallback to the global secret here:
     # accepting a global-secret signature for an arbitrary tenant_id would let anyone
     # spoof a victim tenant's webhook. Reject tenants that aren't configured.
-    _, secret = get_strict_tenant_line_credentials(tenant_id)
+    _, secret = await get_strict_tenant_line_credentials(tenant_id)
     if not secret:
         logger.warning(f"Rejecting webhook for tenant {tenant_id}: no per-tenant LINE channel configured.")
         raise HTTPException(status_code=404, detail="LINE channel not configured for this tenant")
