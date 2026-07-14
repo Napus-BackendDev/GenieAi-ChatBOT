@@ -76,21 +76,20 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
         # can start a chat while Chroma and document metadata are still empty.
         await index_document(parsed_doc, tenant_id=tenant_id)
 
-        extracted_json = {}
-
-        # 4.1. Extract basic details (company_name, business_hours, contact_number)
-        basic_info = await extract_part_from_text(full_raw_text, "basic_info")
-        extracted_json.update(basic_info)
+        # Emit that parsing is done and we are beginning analysis
         await _write_job_status(tenant_id, job_id, {
             "status": "processing",
             "progress": "basic_done",
             "document_name": filename,
-            "extracted_json": extracted_json.copy()
+            "extracted_json": {}
         })
 
-        # 4.2. Extract services
-        services_info = await extract_part_from_text(full_raw_text, "services")
-        extracted_json.update(services_info)
+        # 4. Extract all profile rules (company details, services, staff, rules, promotions, FAQ) in 1 single call
+        # to prevent 429 rate limit errors (from multiple sequential GPT-4o-mini calls).
+        extracted_json = await extract_all_profile_from_text(full_raw_text)
+
+        # Emit services_done progress with a small delay for smooth frontend UI animations
+        await asyncio.sleep(0.5)
         await _write_job_status(tenant_id, job_id, {
             "status": "processing",
             "progress": "services_done",
@@ -98,19 +97,14 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             "extracted_json": extracted_json.copy()
         })
 
-        # 4.3. Extract staff
-        staff_info = await extract_part_from_text(full_raw_text, "staff")
-        extracted_json.update(staff_info)
+        # Emit staff_done progress with a small delay for smooth frontend UI animations
+        await asyncio.sleep(0.5)
         await _write_job_status(tenant_id, job_id, {
             "status": "processing",
             "progress": "staff_done",
             "document_name": filename,
             "extracted_json": extracted_json.copy()
         })
-
-        # 4.4. Extract promotions, FAQs, and custom rules
-        rest_info = await extract_part_from_text(full_raw_text, "rest")
-        extracted_json.update(rest_info)
 
         # Clear Redis cache for the tenant CAG/RAG profile
         from app.core.redis import get_redis
@@ -120,6 +114,7 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
         except Exception:
             pass
 
+        await asyncio.sleep(0.5)
         await _write_job_status(tenant_id, job_id, {
             "status": "done",
             "progress": "all_done",
@@ -142,68 +137,45 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             except Exception as e:
                 logger.error(f"Failed to remove temp file {tmp_path} for job {job_id}: {e}")
 
-async def extract_part_from_text(text: str, part: str) -> dict:
+async def extract_all_profile_from_text(text: str) -> dict:
     """
-    Uses OpenAI to extract a specific subset of business profile details.
-    Allows progressive streaming updates to the frontend client.
+    Uses a single OpenAI call to extract all structured profile details,
+    greatly reducing token consumption and preventing TPM rate limits (429).
     """
     from app.services.openai_service import openai_client
     
-    if part == "basic_info":
-        prompt = (
-            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
-            "หน้าที่ของคุณคือการอ่านข้อความที่ให้มา และดึงข้อมูลของธุรกิจออกเป็นโครงสร้าง JSON ดังนี้เท่านั้น:\n"
-            "{\n"
-            '  "company_name": "ชื่อบริษัท/ร้านค้า (ถ้ามี)",\n'
-            '  "business_hours": "เวลาเปิด-ปิดทำการ เช่น เปิดทุกวัน 09:00 - 20:00 น.",\n'
-            '  "contact_number": "เบอร์ติดต่อร้าน (ถ้ามี)"\n'
-            "}\n"
-            "ห้ามแต่งข้อมูลขึ้นมาเองเด็ดขาด หากไม่มีระบุให้ตอบว่าง (\"\"). ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
-            f"ข้อความ:\n{text}"
-        )
-    elif part == "services":
-        prompt = (
-            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
-            "หน้าที่ของคุณคือการดึงรายการบริการหรือสินค้าทั้งหมดออกมาเป็นโครงสร้าง JSON:\n"
-            "{\n"
-            '  "services": [\n'
-            '    {"name": "ชื่อบริการ/สินค้า", "price": 300, "duration": 30}\n'
-            '  ]\n'
-            "}\n"
-            "หมายเหตุ: price สามารถเป็นตัวเลข หรือข้อความการประมาณราคา เช่น 'เริ่มต้น 600', 'ประมาณ 1000-2000' (ระบุเป็น string เสมอ). "
-            "duration ให้กำหนดเป็น 30 เสมอ. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
-            f"ข้อความ:\n{text}"
-        )
-    elif part == "staff":
-        prompt = (
-            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
-            "หน้าที่ของคุณคือการดึงข้อมูลพนักงานหรือแพทย์ทั้งหมดออกมาเป็นโครงสร้าง JSON:\n"
-            "{\n"
-            '  "staff": [\n'
-            '    {"name": "ชื่อพนักงาน/แพทย์", "role": "ตำแหน่ง เช่น ทันตแพทย์จัดฟัน", "specialties": ["ความเชี่ยวชาญย่อย"], "experience": "ประสบการณ์", "schedule": "ตารางเวลาทำงาน เช่น อังคาร–พุธ 09:00–15:00"}\n'
-            '  ]\n'
-            "}\n"
-            "ตารางเวลาให้ใช้การดึงชื่อวันภาษาไทยตามที่ระบุในคู่มือ ห้ามเดาข้อมูล. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
-            f"ข้อความ:\n{text}"
-        )
-    else:  # rest
-        prompt = (
-            "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
-            "หน้าที่ของคุณคือการดึงโปรโมชัน คำถามที่พบบ่อย (FAQ) และนโยบาย/กฎเพิ่มเติม ออกมาเป็นโครงสร้าง JSON:\n"
-            "{\n"
-            '  "promotions": [\n'
-            '    {"name": "ชื่อโปรโมชัน", "description": "รายละเอียด", "discount": "ส่วนลด", "valid_until": "วันหมดอายุ YYYY-MM-DD หรือเว้นว่างหากไม่ระบุ", "conditions": "เงื่อนไข"}\n'
-            '  ],\n'
-            '  "faq": [\n'
-            '    {"question": "คำถาม", "answer": "คำตอบสำหรับลูกค้า"}\n'
-            '  ],\n'
-            '  "custom_rules": [\n'
-            '    {"category": "หมวดหมู่กฎ/นโยบาย", "rule": "รายละเอียดกฎเกณฑ์"}\n'
-            '  ]\n'
-            "}\n"
-            "หมายเหตุ: ห้ามเดาวันหมดอายุของโปรโมชัน หากไม่ระบุให้เว้นว่างเป็น \"\" เสมอ. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น.\n\n"
-            f"ข้อความ:\n{text}"
-        )
+    prompt = (
+        "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
+        "หน้าที่ของคุณคือการอ่านข้อความคู่มือธุรกิจที่ให้มา และดึงข้อมูลของธุรกิจออกเป็นโครงสร้าง JSON ตามรูปแบบนี้เท่านั้น:\n"
+        "{\n"
+        '  "company_name": "ชื่อบริษัท/ร้านค้า (ถ้ามี)",\n'
+        '  "business_hours": "เวลาเปิด-ปิดทำการ เช่น เปิดทุกวัน 09:00 - 20:00 น.",\n'
+        '  "contact_number": "เบอร์ติดต่อร้าน (ถ้ามี)",\n'
+        '  "services": [\n'
+        '    {"name": "ชื่อบริการ/สินค้า", "price": 300, "duration": 30}\n'
+        '  ],\n'
+        '  "staff": [\n'
+        '    {"name": "ชื่อพนักงาน/แพทย์", "role": "ตำแหน่ง เช่น ทันตแพทย์จัดฟัน", "specialties": ["ความเชี่ยวชาญย่อย"], "experience": "ประสบการณ์ เช่น 5 ปี", "schedule": "ตารางเวลาทำงาน เช่น อังคาร–พุธ 09:00–15:00"}\n'
+        '  ],\n'
+        '  "promotions": [\n'
+        '    {"name": "ชื่อโปรโมชัน", "description": "รายละเอียด", "discount": "ส่วนลด", "valid_until": "วันหมดอายุ YYYY-MM-DD หรือเว้นว่างหากไม่ระบุ", "conditions": "เงื่อนไข"}\n'
+        '  ],\n'
+        '  "faq": [\n'
+        '    {"question": "คำถาม", "answer": "คำตอบสำหรับลูกค้า"}\n'
+        '  ],\n'
+        '  "custom_rules": [\n'
+        '    {"category": "หมวดหมู่กฎ/นโยบาย เช่น การประกัน/การเคลม", "rule": "รายละเอียดกฎเกณฑ์"}\n'
+        '  ]\n'
+        "}\n\n"
+        "กฎเกณฑ์การดึงข้อมูล:\n"
+        "1. ห้ามแต่งข้อมูลหรือสมมติขึ้นมาเองเด็ดขาด หากไม่มีระบุให้กำหนดเป็นค่าว่าง (\"\") หรืออาร์เรย์ว่าง ([])\n"
+        "2. สำหรับ price ใน services สามารถเป็นตัวเลข หรือข้อความการประมาณราคา เช่น 'เริ่มต้น 600', 'ประมาณ 1000-2000' (ระบุเป็น string เสมอ)\n"
+        "3. สำหรับ duration ใน services ให้กำหนดเป็น 30 เสมอหากไม่ระบุในคู่มือ\n"
+        "4. สำหรับ schedule ของพนักงาน ให้ดึงชื่อวันภาษาไทยตามที่ระบุในคู่มือ ห้ามเดาข้อมูล\n"
+        "5. ห้ามเดาวันหมดอายุของโปรโมชัน หากไม่ระบุให้เว้นว่างเป็น \"\" เสมอ\n"
+        "6. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น ไม่มีคำนำหน้า หรือคำอธิบายเพิ่มเติมใดๆ.\n\n"
+        f"ข้อความ:\n{text}"
+    )
 
     try:
         response = await openai_client.chat.completions.create(
@@ -216,7 +188,7 @@ async def extract_part_from_text(text: str, part: str) -> dict:
             raw_content = raw_content.replace("```json", "").replace("```", "").strip()
         return json.loads(raw_content)
     except Exception as e:
-        logger.error(f"Failed to extract rules for part {part}: {e}")
+        logger.error(f"Failed to extract all profile parts: {e}")
         return {}
 
 async def extract_business_rules_from_text(text: str) -> dict:
