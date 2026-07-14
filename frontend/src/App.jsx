@@ -200,13 +200,6 @@ function App() {
       return;
     }
 
-    // If they explicitly visited '/onboarding', force the state to onboarding and do not redirect to dashboard!
-    if (path === 'onboarding') {
-      setOnboardingState('onboard_upload');
-      setLoading(false);
-      return;
-    }
-
     try {
       const docs = await fetchJsonSafe(`/api/documents?tenant_id=${currentUser.tenant_id}`, []);
       const profile = await fetchJsonSafe(`/api/tenant/profile/${currentUser.tenant_id}`, {});
@@ -215,7 +208,6 @@ function App() {
       const hasProfile = Boolean(profile && profile.company_name);
 
       // The Info step is complete only once a company_name is saved in the profile.
-      // (The profile GET no longer returns any secret token fields — line_configured/facebook_configured only.)
       setIsNewUser(!hasProfile);
 
       if (hasProfile) {
@@ -237,6 +229,10 @@ function App() {
         setOnboardingState('onboard_upload');
       } else {
         setOnboardingState('dashboard');
+        if (path === 'onboarding') {
+          window.history.pushState(null, '', '/overview');
+          setActiveTab('overview');
+        }
       }
     } catch (e) {
       console.error("Error verifying onboarding state:", e);
