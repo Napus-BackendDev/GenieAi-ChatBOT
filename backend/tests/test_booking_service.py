@@ -12,6 +12,9 @@ from app.services import booking_service
 def isolated_bookings(tmp_path, monkeypatch):
     """Point the booking store at a throwaway file so tests don't touch real data."""
     monkeypatch.setattr(settings, "BOOKINGS_JSON_PATH", str(tmp_path / "bookings.json"))
+    async def always_on_staff(_tenant_id):
+        return [{"name": "Dr. Test", "schedule": "จันทร์–อาทิตย์ 00:00–23:59"}]
+    monkeypatch.setattr(booking_service, "_load_tenant_staff", always_on_staff)
 
 
 @pytest.fixture
@@ -29,7 +32,10 @@ def isolated_env(tmp_path, monkeypatch):
     def _write_profile(tenant_id: str, booking_settings: dict):
         path = tmp_path / "data" / f"tenant_profile_{tenant_id}.json"
         path.write_text(
-            json.dumps({"booking_settings": booking_settings}), encoding="utf-8"
+            json.dumps({
+                "booking_settings": booking_settings,
+                "staff": [{"name": "Dr. Test", "schedule": "จันทร์–อาทิตย์ 00:00–23:59"}],
+            }), encoding="utf-8"
         )
 
     return _write_profile
