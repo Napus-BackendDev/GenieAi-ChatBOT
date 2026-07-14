@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileText, Save, Trash2, Upload, Plus, AlertCircle, CheckCircle } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@heroui/react';
+import { TableSkeleton } from '../components/SkeletonLoader';
 
 const DocumentManager = ({ tenantId, triggerReupload }) => {
   const [profile, setProfile] = useState({
@@ -120,12 +121,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
   };
 
   if (loading) {
-    return (
-      <div className="text-left py-12 animate-pulse">
-        <h1 className="text-3xl font-extrabold text-[#1A365D] dark:text-white">จัดการความรู้และบริการของร้าน</h1>
-        <p className="text-default-400 mt-2">กำลังโหลดข้อมูลคลังความรู้...</p>
-      </div>
-    );
+    return <TableSkeleton />;
   }
 
   return (

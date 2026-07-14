@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Trash2, Edit2, Search, Award, Languages, Calendar, GraduationCap, Heart, Clock, AlertCircle, CheckCircle, Filter, ChevronDown } from 'lucide-react';
 import { Card, CardContent, Button } from '@heroui/react';
+import { GridSkeleton } from '../components/SkeletonLoader';
 
 const translations = {
   th: {
@@ -475,11 +476,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
   });
 
   if (loading) {
-    return (
-      <div className="py-12 text-center text-slate-400 text-sm animate-pulse">
-        {t.loading}
-      </div>
-    );
+    return <GridSkeleton />;
   }
 
   return (

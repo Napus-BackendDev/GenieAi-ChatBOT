@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Save, Trash2, Upload, Plus, AlertCircle, CheckCircle, Settings, Tag, HelpCircle, Grid, ChevronLeft, ChevronRight, Search, Filter, Calendar, Edit3, ChevronDown } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@heroui/react';
+import { TableSkeleton } from '../components/SkeletonLoader';
 
 const translations = {
   th: {
@@ -697,11 +698,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
   };
 
   if (loading) {
-    return (
-      <div className="py-12 text-center text-slate-400 text-sm animate-pulse">
-        {t.loading}
-      </div>
-    );
+    return <TableSkeleton />;
   }
 
   return (

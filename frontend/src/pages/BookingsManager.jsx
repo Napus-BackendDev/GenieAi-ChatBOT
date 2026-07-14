@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Calendar as CalendarIcon, Search, Trash2, User, Clock, AlertCircle, ChevronLeft, ChevronRight, Stethoscope, ChevronDown, ChevronUp } from 'lucide-react';
 import { Card, CardContent, Button, Chip, Input } from '@heroui/react';
+import { BookingsSkeleton } from '../components/SkeletonLoader';
 
 const translations = {
   th: {
@@ -351,6 +352,10 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
     );
   }
 
+  if (loading) {
+    return <BookingsSkeleton />;
+  }
+
   return (
     <div className="animate-fade-in text-left flex flex-col gap-8 p-6 md:p-8 w-full max-w-full">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -498,11 +503,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
             </div>
 
             {/* Bookings List */}
-            {loading ? (
-              <div className="py-12 text-center text-default-400 text-sm flex-1 flex items-center justify-center">
-                {t.loading}
-              </div>
-            ) : (!profile?.staff || profile.staff.length === 0) && filteredBookings.length === 0 ? (
+            {(!profile?.staff || profile.staff.length === 0) && filteredBookings.length === 0 ? (
               <div className="py-16 text-center text-default-400 text-sm flex-1 flex flex-col items-center justify-center border border-dashed border-white/5 rounded-2xl bg-slate-900/10">
                 <CalendarIcon size={32} className="text-default-400 opacity-60 mb-2 animate-bounce" />
                 <span>{t.noBookings}</span>

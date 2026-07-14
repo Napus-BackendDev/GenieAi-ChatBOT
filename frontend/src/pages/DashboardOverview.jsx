@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Calendar, FileText, Copy, Check, User, Users, Power } from 'lucide-react';
+import { DashboardSkeleton } from '../components/SkeletonLoader';
 
 const translations = {
   th: {
@@ -220,11 +221,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
   const hasBookings = bookings.length > 0;
 
   if (loading) {
-    return (
-      <div className="py-20 text-center text-slate-400 text-sm animate-pulse">
-        {lang === 'th' ? 'กำลังโหลดข้อมูลแดชบอร์ด...' : 'Loading dashboard...'}
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   return (
