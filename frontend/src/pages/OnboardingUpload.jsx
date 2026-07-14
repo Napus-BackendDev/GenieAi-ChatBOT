@@ -13,21 +13,29 @@ const TR = {
   th: {
     brand: 'ตั้งค่าร้านค้า',
     heroTitle: 'สร้างผู้ช่วย AI ประจำร้าน',
-    heroSub: 'ทำตาม 5 ขั้นตอนง่าย ๆ เพื่อให้ AI ตอบลูกค้าและรับจองแทนคุณ',
+    heroSub: 'ทำตามขั้นตอนง่าย ๆ เพื่อให้ AI ตอบลูกค้าและรับจองแทนคุณ',
     stepOf: (n, total) => `ขั้นตอน ${n} จาก ${total}`,
     pctDone: 'เสร็จแล้ว',
     support: 'มีคำถาม? ติดต่อเรา',
     // step names (timeline)
-    s1: 'ข้อมูลร้าน',
-    s1sub: 'ชื่อร้านและข้อมูลติดต่อ',
-    s2: 'อัปโหลดคู่มือ',
-    s2sub: 'ไฟล์รายละเอียดบริการของร้าน',
-    s3: 'เชื่อมต่อ LINE / Facebook',
-    s3sub: 'ให้ AI ตอบผ่านแชท',
-    s4: 'ตรวจสอบข้อมูล',
-    s4sub: 'ยืนยันสิ่งที่ AI อ่านได้',
-    s5: 'เสร็จสิ้น',
-    s5sub: 'เริ่มใช้งานได้เลย',
+    s1: 'อัปโหลดคู่มือ',
+    s1sub: 'ไฟล์รายละเอียดบริการของร้าน',
+    s2: 'เชื่อมต่อ LINE / Facebook',
+    s2sub: 'ให้ AI ตอบผ่านแชท',
+    s3: 'ข้อมูลธุรกิจ',
+    s3sub: 'ชื่อร้าน เวลาทำการ เบอร์ติดต่อ',
+    s4: 'บริการ',
+    s4sub: 'รายการบริการและราคา',
+    s5: 'ทีมงาน',
+    s5sub: 'รายชื่อผู้ให้บริการ',
+    s6: 'โปรโมชัน',
+    s6sub: 'ข้อเสนอและส่วนลดพิเศษ',
+    s7: 'คำถามที่พบบ่อย',
+    s7sub: 'คำถามพบบ่อยสำหรับ AI',
+    s8: 'กฎและนโยบายเพิ่มเติม',
+    s8sub: 'กฎเกณฑ์การบริการของร้าน',
+    s9: 'เสร็จสิ้น',
+    s9sub: 'เริ่มใช้งานได้เลย',
     // step 1 info
     infoTitle: 'ข้อมูลร้านของคุณ',
     infoSub: 'บอกเราสักนิดเกี่ยวกับร้านของคุณ เพื่อให้ AI แนะนำตัวกับลูกค้าได้ถูกต้อง',
@@ -114,20 +122,28 @@ const TR = {
   en: {
     brand: 'Partner Setup',
     heroTitle: 'Build your shop’s AI assistant',
-    heroSub: 'Follow 5 simple steps so the AI can answer customers and take bookings for you.',
+    heroSub: 'Follow simple steps so the AI can answer customers and take bookings for you.',
     stepOf: (n, total) => `Step ${n} of ${total}`,
     pctDone: 'done',
     support: 'Questions? Contact us',
-    s1: 'Shop info',
-    s1sub: 'Name and contact details',
-    s2: 'Upload manual',
-    s2sub: 'Your service details file',
-    s3: 'Connect LINE / Facebook',
-    s3sub: 'Let AI reply on chat',
-    s4: 'Review',
-    s4sub: 'Confirm what AI read',
-    s5: 'Done',
-    s5sub: 'Ready to go',
+    s1: 'Upload manual',
+    s1sub: 'Your service details file',
+    s2: 'Connect LINE / Facebook',
+    s2sub: 'Let AI reply on chat',
+    s3: 'Business info',
+    s3sub: 'Name, hours & phone',
+    s4: 'Services',
+    s4sub: 'Services & pricing list',
+    s5: 'Staff',
+    s5sub: 'Service providers & roles',
+    s6: 'Promotions',
+    s6sub: 'Deals & special offers',
+    s7: 'FAQ',
+    s7sub: 'Frequently asked questions',
+    s8: 'Extra rules & policies',
+    s8sub: 'Custom AI behavioral rules',
+    s9: 'Done',
+    s9sub: 'Ready to go',
     infoTitle: 'Your shop information',
     infoSub: 'Tell us a bit about your shop so the AI can introduce itself correctly to customers.',
     companyLabel: 'Shop / business name',
@@ -316,7 +332,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         throw new Error(data.detail || t.uploadFailed);
       }
       setJobId(data.job_id);
-      setStep(3); // auto-advance instantly; parsing continues in background
+      setStep(2); // auto-advance instantly; parsing continues in background
     } catch (err) {
       setError(err.message === t.uploadFailed ? t.uploadFailed : t.netErr);
     }
@@ -352,6 +368,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           setFaq(ext.faq || []);
           setCustomRules(ext.custom_rules || []);
           setParsing(false);
+          setJobId(null);
         } else if (data.status === 'error') {
           clearInterval(pollRef.current);
           pollRef.current = null;
@@ -369,9 +386,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     pollRef.current = setInterval(poll, 2500);
   };
 
-  // Kick off polling when we land on the review step.
   useEffect(() => {
-    if (step === 4 && jobId) beginPolling();
+    if (step === 3 && jobId) beginPolling();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, jobId]);
@@ -435,7 +451,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         const d = await res.json().catch(() => ({}));
         throw new Error(d.detail || t.saveFailed);
       }
-      setStep(5);
+      setStep(10);
     } catch (err) {
       setError(err.message === t.saveFailed ? t.saveFailed : t.netErr);
     } finally {
@@ -449,7 +465,12 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     { n: 2, title: t.s2, sub: t.s2sub },
     { n: 3, title: t.s3, sub: t.s3sub },
     { n: 4, title: t.s4, sub: t.s4sub },
-    { n: 5, title: t.s5, sub: t.s5sub }
+    { n: 5, title: t.s5, sub: t.s5sub },
+    { n: 6, title: t.s6, sub: t.s6sub },
+    { n: 7, title: t.s7, sub: t.s7sub },
+    { n: 8, title: t.s8, sub: t.s8sub },
+    { n: 9, title: t.s9, sub: t.s9sub },
+    { n: 10, title: t.s10, sub: t.s10sub }
   ];
   const pct = Math.round((step / steps.length) * 100);
   const cur = steps[step - 1];
@@ -536,54 +557,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
             </div>
           )}
 
-          {/* STEP 1: Info */}
+          {/* STEP 1: Upload */}
           {step === 1 && (
-            <div className="animate-fade-in flex flex-col gap-6">
-              <div>
-                <h1 className="text-2xl font-extrabold text-[#1A365D] dark:text-white">{t.infoTitle}</h1>
-                <p className="text-xs text-[#2B6CB0] font-semibold mt-1">{t.infoSub}</p>
-              </div>
-              <div className="bg-white dark:bg-slate-900/60 border border-[#A2D9E8]/35 dark:border-white/5 rounded-3xl p-6 md:p-8 shadow-sm flex flex-col gap-5">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-[#1A365D] dark:text-white">{t.companyLabel}</label>
-                  <div className="flex w-full items-stretch rounded-xl border border-slate-200/60 dark:border-white/10 overflow-hidden bg-slate-50 dark:bg-slate-900 focus-within:border-[#2B6CB0]">
-                    <div className="bg-[#E6F4F8] dark:bg-[#2B6CB0]/20 px-3.5 flex items-center justify-center text-[#1A365D] dark:text-cyan-300 border-r border-slate-200/40 dark:border-white/10">
-                      <Store size={15} />
-                    </div>
-                    <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder={t.companyPh}
-                      className="flex-1 h-11 px-3 text-xs text-[#1A365D] dark:text-white bg-transparent placeholder:text-slate-400 outline-none" />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-[#1A365D] dark:text-white">{t.typeLabel}</label>
-                  <input value={businessType} onChange={(e) => setBusinessType(e.target.value)} placeholder={t.typePh}
-                    className="w-full h-11 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]" />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-xs font-bold text-[#1A365D] dark:text-white">{t.contactLabel}</label>
-                    <div className="flex w-full items-stretch rounded-xl border border-slate-200/60 dark:border-white/10 overflow-hidden bg-slate-50 dark:bg-slate-900 focus-within:border-[#2B6CB0]">
-                      <div className="bg-[#E6F4F8] dark:bg-[#2B6CB0]/20 px-3.5 flex items-center justify-center text-[#1A365D] dark:text-cyan-300 border-r border-slate-200/40 dark:border-white/10">
-                        <Phone size={15} />
-                      </div>
-                      <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder={t.contactPh}
-                        className="flex-1 h-11 px-3 text-xs text-[#1A365D] dark:text-white bg-transparent placeholder:text-slate-400 outline-none" />
-                    </div>
-                  </div>
-                  {!user.phone && (
-                    <div className="flex flex-col gap-1.5">
-                      <label className="text-xs font-bold text-[#1A365D] dark:text-white">{t.phoneLabel}</label>
-                      <input value={ownerPhone} onChange={(e) => setOwnerPhone(e.target.value)} placeholder={t.phonePh}
-                        className="w-full h-11 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]" />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 2: Upload */}
-          {step === 2 && (
             <div className="animate-fade-in flex flex-col gap-6">
               <div>
                 <h1 className="text-2xl font-extrabold text-[#1A365D] dark:text-white">{t.uploadTitle}</h1>
@@ -617,8 +592,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
             </div>
           )}
 
-          {/* STEP 3: Connect channels */}
-          {step === 3 && (
+          {/* STEP 2: Connect channels */}
+          {step === 2 && (
             <div className="animate-fade-in flex flex-col gap-6">
               {jobId && (
                 <div className="inline-flex self-start items-center gap-2 text-[11px] font-bold text-[#2B6CB0] bg-[#2B6CB0]/8 border border-[#2B6CB0]/20 px-3 py-1.5 rounded-full">
@@ -638,8 +613,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
             </div>
           )}
 
-          {/* STEP 4: Review */}
-          {step === 4 && (
+          {/* STEPS 3-8: Review Flow */}
+          {step >= 3 && step <= 8 && (
             <div className="animate-fade-in flex flex-col gap-6">
               {parsing ? (
                 <div className="bg-white dark:bg-slate-900/60 border border-[#A2D9E8]/35 dark:border-white/5 rounded-3xl p-12 shadow-sm flex flex-col items-center gap-4 text-center">
@@ -656,7 +631,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                   </div>
                   <p className="text-sm font-semibold text-[#E53E3E] max-w-[380px]">{parseError}</p>
                   <div className="flex gap-3">
-                    <Button onClick={() => setStep(2)}
+                    <Button onClick={() => setStep(1)}
                       className="bg-white dark:bg-slate-900 border border-[#2B6CB0]/30 text-[#2B6CB0] font-semibold rounded-xl h-11 px-5 hover:bg-[#2B6CB0]/5 cursor-pointer flex items-center gap-2">
                       <RefreshCw size={16} /> {t.retry}
                     </Button>
@@ -670,107 +645,127 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                     </div>
                     <div>
                       <h1 className="text-xl font-extrabold text-[#1A365D] dark:text-white">
-                        {services.length > 0 ? t.reviewFound(services.length) : t.reviewFoundZero}
+                        {step === 3 && "ตรวจสอบข้อมูลธุรกิจ"}
+                        {step === 4 && (services.length > 0 ? t.reviewFound(services.length) : t.reviewFoundZero)}
+                        {step === 5 && "ตรวจสอบรายชื่อทีมงาน"}
+                        {step === 6 && "ตรวจสอบโปรโมชัน"}
+                        {step === 7 && "ตรวจสอบคำถามที่พบบ่อย (FAQ)"}
+                        {step === 8 && "ตรวจสอบกฎและนโยบายเพิ่มเติม"}
                       </h1>
-                      <p className="text-xs text-[#2B6CB0] font-semibold mt-1">{t.reviewSub}</p>
+                      <p className="text-xs text-[#2B6CB0] font-semibold mt-1">
+                        {step === 3 && "ตรวจสอบชื่อร้าน เวลาทำการ และเบอร์โทรของร้านคุณ"}
+                        {step === 4 && t.reviewSub}
+                        {step === 5 && "ตรวจสอบรายชื่อพนักงานและเวลาเข้างานเพื่อความสะดวกในการจองคิว"}
+                        {step === 6 && "ตรวจสอบโปรโมชันที่กำลังจัดรายการเพื่อดึงดูดลูกค้า"}
+                        {step === 7 && "ตรวจสอบคำถามและคำตอบที่ลูกค้าชอบถามบ่อย ๆ เพื่อเป็นฐานความรู้ให้บอต"}
+                        {step === 8 && "ตรวจสอบกฎพิเศษและนโยบายการบริการเฉพาะทาง"}
+                      </p>
                     </div>
                   </div>
 
                   <div className="bg-white dark:bg-slate-900/60 border border-[#A2D9E8]/35 dark:border-white/5 rounded-3xl p-5 md:p-6 shadow-sm flex flex-col gap-5">
-                    {/* Basic fields */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-bold text-[#1A365D] dark:text-white flex items-center gap-1.5"><Store size={13} /> {t.fName}</label>
-                        <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className={inputCls} />
+                    {/* STEP 3: Basic fields */}
+                    {step === 3 && (
+                      <div className="flex flex-col gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-bold text-[#1A365D] dark:text-white flex items-center gap-1.5"><Store size={13} /> {t.fName}</label>
+                            <input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className={inputCls} />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-bold text-[#1A365D] dark:text-white flex items-center gap-1.5"><Clock size={13} /> {t.fHours}</label>
+                            <input value={businessHours} onChange={(e) => setBusinessHours(e.target.value)} placeholder={t.fHoursPh} className={inputCls} />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-xs font-bold text-[#1A365D] dark:text-white flex items-center gap-1.5"><Phone size={13} /> {t.fPhone}</label>
+                            <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder={t.contactPh} className={inputCls} />
+                          </div>
+                        </div>
                       </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-bold text-[#1A365D] dark:text-white flex items-center gap-1.5"><Clock size={13} /> {t.fHours}</label>
-                        <input value={businessHours} onChange={(e) => setBusinessHours(e.target.value)} placeholder={t.fHoursPh} className={inputCls} />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-xs font-bold text-[#1A365D] dark:text-white flex items-center gap-1.5"><Phone size={13} /> {t.fPhone}</label>
-                        <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder={t.contactPh} className={inputCls} />
-                      </div>
-                    </div>
+                    )}
 
-                    {/* Services (always expanded) */}
-                    <div className="flex flex-col gap-3">
-                      <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
-                        <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.servicesTitle}</h4>
-                        <button type="button" onClick={addService} className={sectionBtn}><Plus size={10} /> {t.addService}</button>
+                    {/* STEP 4: Services */}
+                    {step === 4 && (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
+                          <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.servicesTitle}</h4>
+                          <button type="button" onClick={addService} className={sectionBtn}><Plus size={10} /> {t.addService}</button>
+                        </div>
+                        <div className="flex flex-col gap-2.5">
+                          {services.length === 0 ? (
+                            <div className={emptyCls}>{t.noServices}</div>
+                          ) : services.map((s, i) => (
+                            <div key={i} className="flex items-center gap-2 w-full">
+                              <input placeholder={t.svcNamePh} value={s.name} onChange={(e) => changeService(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
+                              <input type="number" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-16 ${rowInput}`} />
+                              <input type="number" placeholder={t.svcDurPh} value={s.duration} onChange={(e) => changeService(i, 'duration', e.target.value)} className={`w-16 ${rowInput}`} />
+                              <button type="button" onClick={() => removeService(i)} className={delBtn}><Trash2 size={13} /></button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex flex-col gap-2.5">
-                        {services.length === 0 ? (
-                          <div className={emptyCls}>{t.noServices}</div>
-                        ) : services.map((s, i) => (
+                    )}
+
+                    {/* STEP 5: Staff */}
+                    {step === 5 && (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
+                          <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.staffTitle}</h4>
+                          <button type="button" onClick={addStaff} className={sectionBtn}><Plus size={10} /> {t.addStaff}</button>
+                        </div>
+                        {staff.length === 0 ? <div className={emptyCls}>{t.noStaff}</div> : staff.map((m, i) => (
                           <div key={i} className="flex items-center gap-2 w-full">
-                            <input placeholder={t.svcNamePh} value={s.name} onChange={(e) => changeService(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
-                            <input type="number" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-16 ${rowInput}`} />
-                            <input type="number" placeholder={t.svcDurPh} value={s.duration} onChange={(e) => changeService(i, 'duration', e.target.value)} className={`w-16 ${rowInput}`} />
-                            <button type="button" onClick={() => removeService(i)} className={delBtn}><Trash2 size={13} /></button>
+                            <input placeholder={t.staffNamePh} value={m.name} onChange={(e) => changeStaff(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
+                            <input placeholder={t.staffRolePh} value={m.role} onChange={(e) => changeStaff(i, 'role', e.target.value)} className={`w-28 ${rowInput}`} />
+                            <input placeholder={t.staffSpecPh} value={m.specialties ? m.specialties.join(', ') : ''} onChange={(e) => changeStaff(i, 'specialties', e.target.value)} className={`w-40 ${rowInput}`} />
+                            <button type="button" onClick={() => removeStaff(i)} className={delBtn}><Trash2 size={13} /></button>
                           </div>
                         ))}
                       </div>
-                    </div>
+                    )}
 
-                    {/* See more (promotions / staff / faq / rules collapsed) */}
-                    <button type="button" onClick={() => setShowMore(!showMore)}
-                      className="self-start flex items-center gap-1.5 text-xs font-bold text-[#2B6CB0] hover:underline cursor-pointer">
-                      <ChevronDown size={14} className={`transition-transform ${showMore ? 'rotate-180' : ''}`} />
-                      {showMore ? t.seeLess : `${t.seeMore} — ${t.moreTitle}`}
-                    </button>
+                    {/* STEP 6: Promotions */}
+                    {step === 6 && (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
+                          <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.promosTitle}</h4>
+                          <button type="button" onClick={addPromo} className={sectionBtn}><Plus size={10} /> {t.addPromo}</button>
+                        </div>
+                        {promotions.length === 0 ? <div className={emptyCls}>{t.noPromos}</div> : promotions.map((p, i) => (
+                          <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
+                            <div className="flex items-center gap-2">
+                              <input placeholder={t.promoNamePh} value={p.name} onChange={(e) => changePromo(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
+                              <input placeholder={t.promoDiscPh} value={p.discount} onChange={(e) => changePromo(i, 'discount', e.target.value)} className={`w-24 ${rowInput}`} />
+                              <button type="button" onClick={() => removePromo(i)} className={delBtn}><Trash2 size={13} /></button>
+                            </div>
+                            <input placeholder={t.promoDescPh} value={p.description} onChange={(e) => changePromo(i, 'description', e.target.value)} className={`w-full ${rowInput}`} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
-                    {showMore && (
-                      <div className="flex flex-col gap-5 animate-fade-in">
-                        {/* Promotions */}
-                        <div className="flex flex-col gap-3">
-                          <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
-                            <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.promosTitle}</h4>
-                            <button type="button" onClick={addPromo} className={sectionBtn}><Plus size={10} /> {t.addPromo}</button>
-                          </div>
-                          {promotions.length === 0 ? <div className={emptyCls}>{t.noPromos}</div> : promotions.map((p, i) => (
-                            <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
-                              <div className="flex items-center gap-2">
-                                <input placeholder={t.promoNamePh} value={p.name} onChange={(e) => changePromo(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
-                                <input placeholder={t.promoDiscPh} value={p.discount} onChange={(e) => changePromo(i, 'discount', e.target.value)} className={`w-24 ${rowInput}`} />
-                                <button type="button" onClick={() => removePromo(i)} className={delBtn}><Trash2 size={13} /></button>
-                              </div>
-                              <input placeholder={t.promoDescPh} value={p.description} onChange={(e) => changePromo(i, 'description', e.target.value)} className={`w-full ${rowInput}`} />
-                            </div>
-                          ))}
+                    {/* STEP 7: FAQ */}
+                    {step === 7 && (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
+                          <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.faqTitle}</h4>
+                          <button type="button" onClick={addFaq} className={sectionBtn}><Plus size={10} /> {t.addFaq}</button>
                         </div>
-                        {/* Staff */}
-                        <div className="flex flex-col gap-3">
-                          <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
-                            <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.staffTitle}</h4>
-                            <button type="button" onClick={addStaff} className={sectionBtn}><Plus size={10} /> {t.addStaff}</button>
-                          </div>
-                          {staff.length === 0 ? <div className={emptyCls}>{t.noStaff}</div> : staff.map((m, i) => (
-                            <div key={i} className="flex items-center gap-2 w-full">
-                              <input placeholder={t.staffNamePh} value={m.name} onChange={(e) => changeStaff(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
-                              <input placeholder={t.staffRolePh} value={m.role} onChange={(e) => changeStaff(i, 'role', e.target.value)} className={`w-28 ${rowInput}`} />
-                              <input placeholder={t.staffSpecPh} value={m.specialties ? m.specialties.join(', ') : ''} onChange={(e) => changeStaff(i, 'specialties', e.target.value)} className={`w-40 ${rowInput}`} />
-                              <button type="button" onClick={() => removeStaff(i)} className={delBtn}><Trash2 size={13} /></button>
+                        {faq.length === 0 ? <div className={emptyCls}>{t.noFaq}</div> : faq.map((it, i) => (
+                          <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
+                            <input placeholder={t.faqQPh} value={it.question} onChange={(e) => changeFaq(i, 'question', e.target.value)} className={`w-full ${rowInput}`} />
+                            <div className="flex items-center gap-2">
+                              <input placeholder={t.faqAPh} value={it.answer} onChange={(e) => changeFaq(i, 'answer', e.target.value)} className={`flex-1 ${rowInput}`} />
+                              <button type="button" onClick={() => removeFaq(i)} className={delBtn}><Trash2 size={13} /></button>
                             </div>
-                          ))}
-                        </div>
-                        {/* FAQ */}
-                        <div className="flex flex-col gap-3">
-                          <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
-                            <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.faqTitle}</h4>
-                            <button type="button" onClick={addFaq} className={sectionBtn}><Plus size={10} /> {t.addFaq}</button>
                           </div>
-                          {faq.length === 0 ? <div className={emptyCls}>{t.noFaq}</div> : faq.map((it, i) => (
-                            <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
-                              <input placeholder={t.faqQPh} value={it.question} onChange={(e) => changeFaq(i, 'question', e.target.value)} className={`w-full ${rowInput}`} />
-                              <div className="flex items-center gap-2">
-                                <input placeholder={t.faqAPh} value={it.answer} onChange={(e) => changeFaq(i, 'answer', e.target.value)} className={`flex-1 ${rowInput}`} />
-                                <button type="button" onClick={() => removeFaq(i)} className={delBtn}><Trash2 size={13} /></button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        {/* Custom rules */}
+                        ))}
+                      </div>
+                    )}
+
+                    {/* STEP 8: Custom Rules */}
+                    {step === 8 && (
+                      <div className="flex flex-col gap-4">
                         <div className="flex flex-col gap-3">
                           <div className="flex justify-between items-center pb-1 border-b border-slate-100 dark:border-white/5">
                             <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.rulesTitle}</h4>
@@ -786,23 +781,23 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                             </div>
                           ))}
                         </div>
-                      </div>
-                    )}
 
-                    {/* Advanced: raw text (hidden) */}
-                    {rawText && (
-                      <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
-                        <button type="button" onClick={() => setShowRaw(!showRaw)}
-                          className="self-start flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 hover:text-[#2B6CB0] cursor-pointer">
-                          <FileText size={12} />
-                          <ChevronDown size={12} className={`transition-transform ${showRaw ? 'rotate-180' : ''}`} />
-                          {t.advanced}
-                        </button>
-                        {showRaw && (
-                          <div className="flex flex-col gap-1.5 animate-fade-in">
-                            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.rawText}</span>
-                            <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} rows={6}
-                              className="w-full p-3 text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0] resize-none" />
+                        {/* Advanced: raw text (hidden) */}
+                        {rawText && (
+                          <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
+                            <button type="button" onClick={() => setShowRaw(!showRaw)}
+                              className="self-start flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 hover:text-[#2B6CB0] cursor-pointer">
+                              <FileText size={12} />
+                              <ChevronDown size={12} className={`transition-transform ${showRaw ? 'rotate-180' : ''}`} />
+                              {t.advanced}
+                            </button>
+                            {showRaw && (
+                              <div className="flex flex-col gap-1.5 animate-fade-in">
+                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.rawText}</span>
+                                <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} rows={6}
+                                  className="w-full p-3 text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0] resize-none" />
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -813,8 +808,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
             </div>
           )}
 
-          {/* STEP 5: Done */}
-          {step === 5 && (
+          {/* STEP 9: Done */}
+          {step === 9 && (
             <div className="animate-fade-in flex flex-col items-center gap-6 text-center py-8">
               <div className="bg-[#38A169]/10 rounded-full w-20 h-20 flex items-center justify-center text-[#38A169] pulse-ring-success">
                 <PartyPopper size={36} />
@@ -832,9 +827,9 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         </div>
 
         {/* Footer nav */}
-        {step < 5 && (
+        {step < 9 && (
           <div className="w-full flex items-center justify-between border-t border-slate-200/60 dark:border-white/5 pt-6 shrink-0 mt-4">
-            {step > 1 && step !== 4 ? (
+            {step > 1 ? (
               <button type="button" onClick={() => setStep(step - 1)}
                 className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-[#2B6CB0] transition-colors cursor-pointer">
                 <ArrowLeft size={14} /> {t.back}
@@ -842,29 +837,23 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
             ) : <span />}
 
             {/* Right-side primary action per step */}
-            {step === 1 && (
-              <Button onClick={handleInfoNext}
-                className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-cyan-500/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
-                <span>{t.next}</span> <ArrowRight size={16} />
-              </Button>
-            )}
-            {step === 3 && (
-              <Button onClick={() => setStep(4)}
+            {step === 2 && (
+              <Button onClick={() => setStep(3)}
                 className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-cyan-500/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
                 <span>{lineConfigured ? t.next : t.connectSkip}</span> <ArrowRight size={16} />
               </Button>
             )}
-            {step === 4 && !parsing && !parseError && (
-              <div className="flex items-center gap-3 ml-auto">
-                <button type="button" onClick={() => setStep(3)}
-                  className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-[#2B6CB0] transition-colors cursor-pointer">
-                  <ArrowLeft size={14} /> {t.back}
-                </button>
-                <Button onClick={handleConfirm} isLoading={saving}
-                  className="bg-gradient-to-r from-[#38A169] to-emerald-500 hover:from-[#2F855A] hover:to-emerald-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-[#38A169]/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
-                  <CheckCircle size={16} /> <span>{t.confirm}</span>
-                </Button>
-              </div>
+            {step >= 3 && step < 8 && !parsing && !parseError && (
+              <Button onClick={() => setStep(step + 1)}
+                className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-cyan-500/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
+                <span>{t.next}</span> <ArrowRight size={16} />
+              </Button>
+            )}
+            {step === 8 && !parsing && !parseError && (
+              <Button onClick={handleConfirm} isLoading={saving}
+                className="bg-gradient-to-r from-[#38A169] to-emerald-500 hover:from-[#2F855A] hover:to-emerald-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-[#38A169]/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
+                <CheckCircle size={16} /> <span>{t.confirm}</span>
+              </Button>
             )}
           </div>
         )}
