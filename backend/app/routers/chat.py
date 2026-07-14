@@ -246,7 +246,19 @@ async def reply_to_session(req: ReplyRequest, current_tenant: str = Depends(get_
 
         # If it's a real LINE user (session_id doesn't start with mock_), push to LINE messaging API
         if not session_id.startswith("mock_"):
-            line_message = [{"type": "text", "text": message}]
+            if message.startswith("[[STICKER:") and message.endswith("]]"):
+                parts = message[10:-2].split(":")
+                if len(parts) == 2:
+                    package_id, sticker_id = parts[0], parts[1]
+                    line_message = [{
+                        "type": "sticker",
+                        "packageId": package_id,
+                        "stickerId": sticker_id
+                    }]
+                else:
+                    line_message = [{"type": "text", "text": message}]
+            else:
+                line_message = [{"type": "text", "text": message}]
             await push_to_line(user_id=session_id, messages=line_message)
             
         return {"status": "success"}

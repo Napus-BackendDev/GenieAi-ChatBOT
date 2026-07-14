@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 import logging
 import threading
 import chromadb
@@ -62,8 +63,18 @@ async def index_document(parsed_doc: dict, tenant_id: str = "default") -> None:
     doc_id = parsed_doc["document_id"]
     doc_name = parsed_doc["document_name"]
     pages = parsed_doc["pages"]
+    content_hash = hashlib.sha256(
+        "\n".join(page.get("text", "").strip() for page in pages).encode("utf-8")
+    ).hexdigest()
     
     collection = get_knowledge_collection()
+    existing = collection.get(where={"tenant_id": tenant_id})
+    old_doc_ids = {
+        meta.get("document_id")
+        for meta in (existing.get("metadatas") or [])
+        if meta.get("document_id") != doc_id
+        and (meta.get("document_name") == doc_name or meta.get("content_hash") == content_hash)
+    }
     
     ids = []
     embeddings = []
@@ -102,6 +113,7 @@ async def index_document(parsed_doc: dict, tenant_id: str = "default") -> None:
                 "tenant_id": tenant_id,
                 "document_id": doc_id,
                 "document_name": doc_name,
+                "content_hash": content_hash,
                 "page_number": page_num
             })
             
@@ -114,13 +126,26 @@ async def index_document(parsed_doc: dict, tenant_id: str = "default") -> None:
             metadatas=metadatas
         )
         logger.info(f"Successfully indexed {len(ids)} chunks from '{doc_name}' into ChromaDB.")
+        for old_doc_id in old_doc_ids:
+            collection.delete(where={"$and": [
+                {"tenant_id": tenant_id},
+                {"document_id": old_doc_id},
+            ]})
         
     # Save metadata
     docs_meta = await db_load_documents()
+    docs_meta = [
+        doc for doc in docs_meta
+        if not (
+            doc.get("tenant_id") == tenant_id
+            and doc.get("document_id") in old_doc_ids
+        )
+    ]
     docs_meta.append({
         "document_id": doc_id,
         "document_name": doc_name,
         "tenant_id": tenant_id,
+        "content_hash": content_hash,
         "pages": pages_meta,
         "uploaded_at": chromadb.utils.embedding_functions.EmbeddingFunction.__class__.__name__
     })
@@ -240,23 +265,16 @@ async def get_tenant_knowledge_profile(tenant_id: str) -> dict:
         logger.warning(f"Failed to access Redis for CAG profile: {e}")
         redis_client = None
 
-    # Load documents metadata
-    docs_meta = await db_load_documents()
-    
-    # Check if there are any documents for this tenant
-    tenant_docs = [d for d in docs_meta if d.get("tenant_id") == tenant_id]
-    
     consolidated_text_parts = []
-    
-    if tenant_docs:
-        collection = get_knowledge_collection()
-        # Query ChromaDB for all chunks matching tenant_id
-        try:
-            results = collection.get(where={"tenant_id": tenant_id})
-            if results and results["documents"]:
-                consolidated_text_parts = results["documents"]
-        except Exception as e:
-            logger.error(f"Failed to fetch document chunks from ChromaDB for tenant {tenant_id}: {e}")
+    collection = get_knowledge_collection()
+    # Chroma is the corpus source of truth. Metadata may temporarily be missing
+    # after a failed legacy upload or a Mongo/JSON fallback transition.
+    try:
+        results = collection.get(where={"tenant_id": tenant_id})
+        if results and results["documents"]:
+            consolidated_text_parts = results["documents"]
+    except Exception as e:
+        logger.error(f"Failed to fetch document chunks from ChromaDB for tenant {tenant_id}: {e}")
 
     consolidated_text = "\n\n".join(consolidated_text_parts)
     # Estimate token count (chars / 4)

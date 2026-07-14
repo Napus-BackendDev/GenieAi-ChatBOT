@@ -72,14 +72,9 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             "extracted_json": {}
         })
 
-        # 3. Index parsed chunks into ChromaDB (RAG) in the background (non-blocking)
-        async def run_indexing_background():
-            try:
-                await index_document(parsed_doc, tenant_id=tenant_id)
-            except Exception as ex:
-                logger.error(f"Error indexing document {filename} in background: {ex}")
-
-        asyncio.create_task(run_indexing_background())
+        # 3. Finish indexing before reporting the upload as done. Otherwise the UI
+        # can start a chat while Chroma and document metadata are still empty.
+        await index_document(parsed_doc, tenant_id=tenant_id)
 
         extracted_json = {}
 
