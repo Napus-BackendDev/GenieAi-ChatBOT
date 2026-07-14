@@ -37,10 +37,22 @@ async def init_mongo() -> None:
         await _mongo_client.admin.command("ping")
         _mongo_db = _mongo_client[settings.MONGODB_DB_NAME]
         logger.info(f"Connected to MongoDB database '{settings.MONGODB_DB_NAME}'.")
+        await _ensure_indexes(_mongo_db)
     except Exception as e:
         logger.error(f"Failed to connect to MongoDB (check MONGODB_URI / password): {e}")
         _mongo_client = None
         _mongo_db = None
+
+
+async def _ensure_indexes(db) -> None:
+    """Enforce the 1:1 tenant link: exactly one user and one profile per tenant_id.
+    create_index is idempotent, so this is safe to run on every startup. Best-effort —
+    an index error must never take down the app (JSON fallback would still work)."""
+    try:
+        await db.users.create_index("tenant_id", unique=True, name="uniq_tenant_id")
+        await db.tenant_profiles.create_index("tenant_id", unique=True, name="uniq_tenant_id")
+    except Exception as e:
+        logger.warning(f"Could not ensure tenant_id unique indexes: {e}")
 
 
 def get_mongo_db():
