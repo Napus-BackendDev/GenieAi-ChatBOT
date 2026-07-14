@@ -106,7 +106,7 @@ const TR = {
     ruleTextPh: 'รายละเอียดกฎ',
     advanced: 'ขั้นสูง: ดูข้อความต้นฉบับ',
     rawText: 'ข้อความต้นฉบับจากไฟล์',
-    invalidService: 'กรุณากรอกชื่อบริการให้ครบ และระบุราคา (ไม่ต่ำกว่า 0) กับเวลา (มากกว่า 0 นาที) ให้ถูกต้อง',
+    invalidService: 'กรุณากรอกชื่อบริการให้ครบ และระบุเวลา (มากกว่า 0 นาที) ให้ถูกต้อง',
     saveFailed: 'บันทึกข้อมูลไม่สำเร็จ',
     parseFailed: 'อ่านคู่มือไม่สำเร็จ กรุณาลองอัปโหลดใหม่',
     // step 5 done
@@ -210,7 +210,7 @@ const TR = {
     ruleTextPh: 'Rule details',
     advanced: 'Advanced: view original text',
     rawText: 'Original text from your file',
-    invalidService: 'Please fill every service name, and set a valid price (≥ 0) and time (> 0 min).',
+    invalidService: 'Please fill every service name and set a valid time (> 0 min).',
     saveFailed: 'Could not save your data.',
     parseFailed: 'Could not read the manual. Please try uploading again.',
     doneTitle: 'All set! 🎉',
@@ -367,6 +367,15 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
 
   // Merge one file's extracted_json into the running accumulator.
   // Scalars: keep the first non-empty. Lists: concat + dedupe by a natural key.
+  const normalizeServices = (items) => (items || [])
+    .map((s) => ({
+      ...s,
+      name: String(s.name || '').trim(),
+      price: String(s.price ?? ''),
+      duration: Number(s.duration) > 0 ? Number(s.duration) : 30,
+    }))
+    .filter((s) => s.name);
+
   const mergeExtracted = (base, ext) => {
     const b = base || {};
     const dedupe = (arr, keyFn) => {
@@ -404,7 +413,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
       if (m.company_name) setCompanyName(m.company_name);
       if (m.business_hours) setBusinessHours(m.business_hours);
       if (m.contact_number) setContactNumber(m.contact_number);
-      if (m.services.length) setServices(m.services);
+      if (m.services.length) setServices(normalizeServices(m.services));
       if (m.promotions.length) setPromotions(m.promotions);
       if (m.staff.length) setStaff(m.staff);
       if (m.faq.length) setFaq(m.faq);
@@ -475,7 +484,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     if (ext.company_name) setCompanyName(ext.company_name);
     if (ext.business_hours) setBusinessHours(ext.business_hours);
     if (ext.contact_number) setContactNumber(ext.contact_number);
-    if (ext.services && ext.services.length) setServices(ext.services);
+    if (ext.services && ext.services.length) setServices(normalizeServices(ext.services));
     if (ext.promotions && ext.promotions.length) setPromotions(ext.promotions);
     if (ext.staff && ext.staff.length) setStaff(ext.staff);
     if (ext.faq && ext.faq.length) setFaq(ext.faq);
@@ -484,11 +493,11 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   };
 
   // ---- generic list helpers ----
-  const addService = () => setServices([...services, { name: '', price: 0, duration: 30 }]);
+  const addService = () => setServices([...services, { name: '', price: '', duration: 30 }]);
   const removeService = (i) => setServices(services.filter((_, x) => x !== i));
   const changeService = (i, f, v) => {
     const u = [...services];
-    u[i][f] = f === 'price' || f === 'duration' ? Number(v) : v;
+    u[i][f] = f === 'duration' ? Number(v) : v;
     setServices(u);
   };
   const addPromo = () => setPromotions([...promotions, { name: '', description: '', discount: '', valid_until: '', conditions: '' }]);
@@ -511,7 +520,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   // ---- Step 4: confirm + save profile ----
   const handleConfirm = async () => {
     setError('');
-    const bad = services.find(s => !s.name.trim() || s.price < 0 || s.duration <= 0);
+    const bad = services.find(s => !s.name.trim() || !(Number(s.duration) > 0));
     if (bad) {
       setError(t.invalidService);
       return;
@@ -825,7 +834,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                           ) : services.map((s, i) => (
                             <div key={i} className="flex items-center gap-2 w-full">
                               <input placeholder={t.svcNamePh} value={s.name} onChange={(e) => changeService(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
-                              <input type="number" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-16 ${rowInput}`} />
+                              <input type="text" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-16 ${rowInput}`} />
                               <input type="number" placeholder={t.svcDurPh} value={s.duration} onChange={(e) => changeService(i, 'duration', e.target.value)} className={`w-16 ${rowInput}`} />
                               <button type="button" onClick={() => removeService(i)} className={delBtn}><Trash2 size={13} /></button>
                             </div>
