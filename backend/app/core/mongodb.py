@@ -45,7 +45,7 @@ async def init_mongo() -> None:
 
 
 async def _ensure_indexes(db) -> None:
-    """Enforce the 1:1 tenant link: exactly one user and one profile per tenant_id.
+    """Ensure MongoDB indexes used for tenant isolation and common queries.
     create_index is idempotent, so this is safe to run on every startup. Best-effort —
     an index error must never take down the app (JSON fallback would still work)."""
     try:
@@ -60,6 +60,15 @@ async def _ensure_indexes(db) -> None:
         )
         # Fast reverse lookup for Facebook webhook routing (page_id -> tenant).
         await db.tenant_profiles.create_index("facebook_page_id", name="fb_page_lookup")
+        await db.documents.create_index("tenant_id", name="idx_tenant_id")
+        await db.documents.create_index(
+            [("tenant_id", 1), ("content_hash", 1)],
+            unique=True,
+            name="uniq_tenant_content",
+            partialFilterExpression={"content_hash": {"$exists": True}},
+        )
+        await db.bookings.create_index("tenant_id", name="idx_tenant_id")
+        await db.bookings.create_index("booking_datetime", name="idx_booking_datetime")
     except Exception as e:
         logger.warning(f"Could not ensure indexes: {e}")
 
