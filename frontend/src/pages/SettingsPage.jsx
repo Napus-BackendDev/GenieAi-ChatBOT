@@ -154,15 +154,13 @@ const SettingsPage = ({ tenantId, lang }) => {
 
   const webhookUrls = (() => {
     let base = window.location.origin;
-    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    if (isLocalhost) {
-      const backendHost = window.location.host.replace('5173', '8000');
-      base = `${window.location.protocol}//${backendHost}`;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      base = 'https://genieai-chatbot.onrender.com';
     }
     return {
       line: `${base}/api/webhooks/line/${tenantId}`,
       facebook: `${base}/api/webhooks/facebook/${tenantId}`,
-      isLocalhost
+      isLocalhost: false
     };
   })();
 

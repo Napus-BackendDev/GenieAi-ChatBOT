@@ -10,14 +10,12 @@ import { Button, Input } from '@heroui/react';
 const buildWebhookBase = () => {
   let base = window.location.origin;
   if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    const backendHost = window.location.host.replace('5173', '8000');
-    base = `${window.location.protocol}//${backendHost}`;
+    base = 'https://genieai-chatbot.onrender.com';
   }
   return base;
 };
 
-const isLocalHost = () =>
-  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isLocalHost = () => false;
 
 const T = {
   th: {

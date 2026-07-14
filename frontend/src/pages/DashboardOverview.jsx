@@ -88,13 +88,12 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
   // Webhook URL: on localhost dev map port 5173 -> backend 8000, otherwise use current origin.
   const webhookUrl = (() => {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      const backendHost = window.location.host.replace('5173', '8000');
-      return `${window.location.protocol}//${backendHost}/api/webhooks/line/${tenantId}`;
+      return `https://genieai-chatbot.onrender.com/api/webhooks/line/${tenantId}`;
     }
     return `${window.location.origin}/api/webhooks/line/${tenantId}`;
   })();
 
-  const isLocalWebhook = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const isLocalWebhook = false;
 
   useEffect(() => {
     let cancelled = false;
