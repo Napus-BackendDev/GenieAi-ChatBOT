@@ -314,27 +314,43 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     return '';
   };
 
-  const startUpload = async (file) => {
-    setError('');
-    const msg = validateFile(file);
-    if (msg) {
-      setError(msg);
-      return;
+  const uploadOne = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`/api/documents/upload?tenant_id=${tenantId}`, {
+      method: 'POST',
+      body: formData
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.job_id) {
+      throw new Error(data.detail || t.uploadFailed);
     }
-    setFileName(file.name);
+    return data.job_id;
+  };
+
+  const startUpload = async (fileList) => {
+    setError('');
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (!files.length) return;
+    // Validate every file before uploading any.
+    for (const f of files) {
+      const msg = validateFile(f);
+      if (msg) {
+        setError(msg);
+        return;
+      }
+    }
+    setFileName(files.map((f) => f.name).join(', '));
     setParseError('');
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch(`/api/documents/upload?tenant_id=${tenantId}`, {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.job_id) {
-        throw new Error(data.detail || t.uploadFailed);
-      }
-      setJobId(data.job_id);
+      // The FIRST file drives onboarding auto-extraction (services/staff/FAQ…).
+      // The rest are still uploaded and indexed into the RAG corpus in the
+      // background so the AI can answer from all of them — they just don't feed
+      // the wizard's extracted fields.
+      const [primary, ...rest] = files;
+      const primaryJob = await uploadOne(primary);
+      rest.forEach((f) => uploadOne(f).catch(() => {}));
+      setJobId(primaryJob);
       setStep(2); // auto-advance instantly; parsing continues in background
     } catch (err) {
       setError(err.message === t.uploadFailed ? t.uploadFailed : t.netErr);
@@ -343,7 +359,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
 
   const onFileDrop = (e) => {
     e.preventDefault();
-    startUpload(e.dataTransfer.files[0]);
+    startUpload(e.dataTransfer.files);
   };
 
   // ---- Step 4: poll upload status ----
@@ -654,8 +670,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                   onClick={() => fileInputRef.current?.click()}
                   className="border-2 border-dashed border-[#A2D9E8] dark:border-white/15 hover:border-[#2B6CB0] bg-[#E6F4F8]/10 dark:bg-white/5 hover:bg-[#E6F4F8]/25 rounded-2xl p-14 cursor-pointer transition-all flex flex-col items-center gap-4 group"
                 >
-                  <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.txt,.md"
-                    onChange={(e) => startUpload(e.target.files[0])} />
+                  <input ref={fileInputRef} type="file" multiple className="hidden" accept=".pdf,.txt,.md"
+                    onChange={(e) => startUpload(e.target.files)} />
                   <div className="bg-[#E6F4F8] dark:bg-[#2B6CB0]/20 rounded-full w-14 h-14 flex items-center justify-center text-[#2B6CB0] dark:text-cyan-300 border border-[#A2D9E8]/30 group-hover:scale-105 transition-transform duration-300">
                     <Upload size={24} />
                   </div>
