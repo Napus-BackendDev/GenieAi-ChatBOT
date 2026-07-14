@@ -109,6 +109,9 @@ class TenantProfile(BaseModel):
     line_verified: bool = False
     facebook_page_access_token: str = ""
     facebook_verify_token: str = ""
+    # The Messenger Page ID this tenant owns — used to route incoming Facebook
+    # webhook events (entry.id) to the correct tenant instead of a global default.
+    facebook_page_id: str = ""
     webchat_settings: WebchatSettings = WebchatSettings()
     ai_settings: AISettings = AISettings()
     booking_settings: BookingSettings = BookingSettings()
@@ -444,6 +447,7 @@ class SettingsUpdateRequest(BaseModel):
     line_channel_secret: str = ""
     facebook_page_access_token: str = ""
     facebook_verify_token: str = ""
+    facebook_page_id: str = ""
     webchat_settings: WebchatSettings = WebchatSettings()
     ai_settings: AISettings = AISettings()
     booking_settings: BookingSettings = BookingSettings()

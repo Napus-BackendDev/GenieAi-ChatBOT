@@ -163,12 +163,13 @@ function App() {
   useEffect(() => {
     const savedUser = localStorage.getItem('genie_ai_user');
     if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
+      const parsedUser = reconcileTenant(JSON.parse(savedUser));
       setUser(parsedUser);
       checkUserOnboardingStatus(parsedUser);
     } else {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-redirect logged-in users away from auth screen to dashboard or onboarding
@@ -177,6 +178,24 @@ function App() {
       checkUserOnboardingStatus(user);
     }
   }, [user, onboardingState]);
+
+  // The JWT is the single source of truth for tenant identity: its `sub` claim IS
+  // the tenant_id, and every tenant-scoped endpoint compares the path tenant_id to
+  // the token's (403 on mismatch). Deriving tenant_id from the token — rather than a
+  // possibly-stale stored user object — guarantees they always agree (e.g. after
+  // switching accounts without a full reload).
+  const reconcileTenant = (u) => {
+    if (!u) return u;
+    try {
+      const token = localStorage.getItem('genie_ai_token');
+      if (!token) return u;
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      if (payload?.sub && payload.sub !== u.tenant_id) {
+        return { ...u, tenant_id: payload.sub };
+      }
+    } catch { /* malformed token — keep the stored tenant_id */ }
+    return u;
+  };
 
   // Safe JSON fetch: tolerates an empty body or a backend that is briefly down,
   // returning `fallback` instead of throwing, so onboarding routing never crashes.
@@ -252,10 +271,12 @@ function App() {
     if (authenticatedUser?.access_token) {
       localStorage.setItem('genie_ai_token', authenticatedUser.access_token);
     }
-    setUser(authenticatedUser);
-    localStorage.setItem('genie_ai_user', JSON.stringify(authenticatedUser));
+    // Keep tenant_id in lockstep with the freshly stored token (avoids 403s).
+    const reconciled = reconcileTenant(authenticatedUser);
+    setUser(reconciled);
+    localStorage.setItem('genie_ai_user', JSON.stringify(reconciled));
     setLoading(true);
-    checkUserOnboardingStatus(authenticatedUser);
+    checkUserOnboardingStatus(reconciled);
   };
 
   const handleOnboardingComplete = () => {

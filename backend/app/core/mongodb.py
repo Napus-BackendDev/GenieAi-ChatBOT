@@ -58,6 +58,8 @@ async def _ensure_indexes(db) -> None:
         await db.conversations.create_index(
             [("tenant_id", 1), ("updated_at", -1)], name="tenant_recent"
         )
+        # Fast reverse lookup for Facebook webhook routing (page_id -> tenant).
+        await db.tenant_profiles.create_index("facebook_page_id", name="fb_page_lookup")
     except Exception as e:
         logger.warning(f"Could not ensure indexes: {e}")
 

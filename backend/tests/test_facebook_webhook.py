@@ -51,18 +51,19 @@ def test_parse_text_message_event():
     payload = {
         "object": "page",
         "entry": [
-            {"messaging": [{"sender": {"id": "USER123"}, "message": {"text": "hello"}}]}
+            {"id": "PAGE1", "messaging": [{"sender": {"id": "USER123"}, "message": {"text": "hello"}}]}
         ],
     }
     events = parse_messaging_events(payload)
-    assert events == [{"sender_id": "USER123", "text": "hello"}]
+    # page_id (entry.id) is carried through for multi-tenant routing.
+    assert events == [{"sender_id": "USER123", "text": "hello", "page_id": "PAGE1"}]
 
 
 def test_parse_skips_echo_and_non_text():
     payload = {
         "object": "page",
         "entry": [
-            {"messaging": [
+            {"id": "PAGE2", "messaging": [
                 {"sender": {"id": "U1"}, "message": {"text": "hi", "is_echo": True}},
                 {"sender": {"id": "U2"}, "message": {"attachments": [{"type": "image"}]}},
                 {"sender": {"id": "U3"}, "delivery": {"mids": ["m1"]}},
@@ -71,7 +72,7 @@ def test_parse_skips_echo_and_non_text():
         ],
     }
     events = parse_messaging_events(payload)
-    assert events == [{"sender_id": "U4", "text": "keep me"}]
+    assert events == [{"sender_id": "U4", "text": "keep me", "page_id": "PAGE2"}]
 
 
 def test_parse_ignores_non_page_object():

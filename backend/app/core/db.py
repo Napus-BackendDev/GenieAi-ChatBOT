@@ -494,3 +494,55 @@ async def db_clear_conversation(tenant_id: str, session_id: str) -> bool:
             return False
         _save_conversations_json(remaining)
         return True
+
+
+# ==========================================
+# 6. Tenant Routing helpers (multi-tenant channel resolution)
+# Replace get_active_tenant_id() (first-user) — resolve the OWNING tenant per channel
+# so a customer's messages always land in the right inbox.
+# ==========================================
+
+async def db_resolve_tenant_by_fb_page_id(page_id: str) -> str | None:
+    """Which tenant owns this Facebook Page ID? None if unmapped."""
+    if not page_id:
+        return None
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            doc = await db.tenant_profiles.find_one(
+                {"facebook_page_id": page_id}, {"tenant_id": 1}
+            )
+            return doc.get("tenant_id") if doc else None
+        except Exception as e:
+            logger.error(f"Error resolving tenant by FB page id: {e}")
+            return None
+
+    # JSON fallback: scan tenant_profile_*.json for a matching facebook_page_id.
+    import glob
+    data_dir = os.path.dirname(_get_profile_path("x")) or "data"
+    for path in glob.glob(os.path.join(data_dir, "tenant_profile_*.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                prof = json.load(f)
+            if prof.get("facebook_page_id") == page_id:
+                return prof.get("tenant_id") or os.path.basename(path)[len("tenant_profile_"):-len(".json")]
+        except Exception:
+            continue
+    return None
+
+
+async def db_tenant_exists(tenant_id: str) -> bool:
+    """True if tenant_id belongs to a real registered user. Used to reject
+    channel requests carrying a bogus/blank tenant_id (prevents cross-tenant probing
+    and 'default'-bucket scatter)."""
+    if not tenant_id:
+        return False
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            return await db.users.count_documents({"tenant_id": tenant_id}, limit=1) > 0
+        except Exception as e:
+            logger.error(f"Error checking tenant existence: {e}")
+            return False
+    users = await db_load_users()
+    return any(u.get("tenant_id") == tenant_id for u in users)

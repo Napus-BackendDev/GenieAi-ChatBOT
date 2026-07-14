@@ -66,6 +66,8 @@ def parse_messaging_events(payload: dict) -> list[dict]:
     if not isinstance(payload, dict) or payload.get("object") != "page":
         return events
     for entry in payload.get("entry", []) or []:
+        # entry.id is the Page ID that received the message — the routing key.
+        page_id = str(entry.get("id") or "")
         for messaging in entry.get("messaging", []) or []:
             message = messaging.get("message") or {}
             # Skip echoes of our own outgoing messages.
@@ -74,7 +76,7 @@ def parse_messaging_events(payload: dict) -> list[dict]:
             text = message.get("text")
             sender_id = (messaging.get("sender") or {}).get("id")
             if sender_id and isinstance(text, str) and text.strip():
-                events.append({"sender_id": sender_id, "text": text.strip()})
+                events.append({"sender_id": sender_id, "text": text.strip(), "page_id": page_id})
     return events
 
 
@@ -98,9 +100,19 @@ async def send_fb_message(recipient_id: str, text: str, page_access_token: str) 
 async def handle_facebook_event(sender_id: str, text: str, tenant_id: str) -> None:
     """Background task: run the AI pipeline and push each bubble to Messenger."""
     try:
-        page_access_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
+        # Prefer the tenant's own Page access token (multi-tenant); fall back to the
+        # global env token for single-page/legacy setups.
+        page_access_token = ""
+        try:
+            from app.core.db import db_load_profile
+            profile = await db_load_profile(tenant_id)
+            page_access_token = (profile or {}).get("facebook_page_access_token") or ""
+        except Exception:
+            pass
         if not page_access_token:
-            logger.error("FB_PAGE_ACCESS_TOKEN not configured; cannot send Facebook reply.")
+            page_access_token = os.getenv("FB_PAGE_ACCESS_TOKEN") or ""
+        if not page_access_token:
+            logger.error(f"No Facebook Page access token for tenant {tenant_id}; cannot send reply.")
             return
 
         result = await generate_ai_bubbles(
@@ -169,11 +181,20 @@ async def facebook_webhook(
         logger.error(f"Facebook webhook JSON parsing failed: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    # ponytail: single-tenant for now, same as the LINE webhook. Per-channel tenant
-    # mapping (FB Page ID -> tenant_id) goes here when multi-tenant routing ships.
-    tenant_id = await get_active_tenant_id()
+    # Multi-tenant routing: resolve the owning tenant from the Page ID (entry.id).
+    # Fall back to the active tenant only when NO page mapping exists at all
+    # (single-page/legacy setups) so we never silently misroute a configured page.
+    from app.core.db import db_resolve_tenant_by_fb_page_id
 
     for event in parse_messaging_events(payload):
+        page_id = event.get("page_id")
+        tenant_id = await db_resolve_tenant_by_fb_page_id(page_id)
+        if not tenant_id:
+            fallback = await get_active_tenant_id()
+            logger.warning(
+                f"Facebook page {page_id} not mapped to any tenant; falling back to active tenant {fallback}."
+            )
+            tenant_id = fallback
         background_tasks.add_task(
             handle_facebook_event, event["sender_id"], event["text"], tenant_id
         )

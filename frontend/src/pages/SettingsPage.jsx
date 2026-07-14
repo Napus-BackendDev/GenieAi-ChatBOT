@@ -138,6 +138,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
     line_channel_secret: '',
     facebook_page_access_token: '',
     facebook_verify_token: '',
+    facebook_page_id: '',
     webchat_settings: {
       enabled: true,
       theme_color: '#2B6CB0',
@@ -185,6 +186,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
           line_channel_secret: '',
           facebook_page_access_token: '',
           facebook_verify_token: data.facebook_verify_token || '',
+          facebook_page_id: data.facebook_page_id || '',
           webchat_settings: {
             enabled: data.webchat_settings?.enabled ?? true,
             theme_color: data.webchat_settings?.theme_color || '#2B6CB0',
@@ -586,6 +588,19 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                         value={settings.facebook_verify_token}
                         onChange={(e) => setSettings({ ...settings, facebook_verify_token: e.target.value })}
                         placeholder="เช่น my_secret_verify_token"
+                        className="w-full h-10 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]"
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-1 text-left">
+                      <label className="text-xs font-bold text-foreground">
+                        {lang === 'en' ? 'Facebook Page ID' : 'Facebook Page ID (รหัสเพจ)'}
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.facebook_page_id}
+                        onChange={(e) => setSettings({ ...settings, facebook_page_id: e.target.value })}
+                        placeholder={lang === 'en' ? 'e.g. 1234567890 — routes messages to this shop' : 'เช่น 1234567890 — ใช้ส่งข้อความเข้าร้านที่ถูกต้อง'}
                         className="w-full h-10 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]"
                       />
                     </div>

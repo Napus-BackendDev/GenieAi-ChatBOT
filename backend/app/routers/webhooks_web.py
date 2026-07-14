@@ -165,9 +165,18 @@ async def web_webhook(req: WebChatRequest) -> dict:
     No signature (same-origin from the dashboard widget). Nothing sensitive is
     derived from the body beyond the message, session id, and tenant id.
     """
+    # Multi-tenant routing: the widget names its tenant_id in the body. Reject a
+    # blank/unknown tenant so messages can't scatter into a 'default' bucket or
+    # probe another tenant's knowledge base. (A signed widget key can replace this
+    # trust-the-body check later; rejecting unknown tenants is the safe minimum.)
+    from app.core.db import db_tenant_exists
+    tenant_id = (req.tenant_id or "").strip()
+    if not await db_tenant_exists(tenant_id):
+        logger.warning(f"Web chat rejected: unknown tenant_id '{tenant_id}'.")
+        raise HTTPException(status_code=404, detail="Unknown tenant")
     try:
         result = await generate_ai_bubbles(
-            tenant_id=req.tenant_id,
+            tenant_id=tenant_id,
             session_id=req.session_id,
             user_message=req.message,
         )

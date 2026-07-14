@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import tempfile
 import logging
@@ -188,8 +189,10 @@ async def extract_all_profile_from_text(text: str) -> dict:
         f"ข้อความ:\n{text}"
     )
 
-    max_retries = 3
-    delay = 2.0
+    # TPM (tokens-per-minute) limits reset each minute, so on a 429 we wait long
+    # enough for the window to clear rather than giving up after a few short retries.
+    max_retries = 6
+    delay = 3.0
     for attempt in range(max_retries):
         try:
             response = await openai_client.chat.completions.create(
@@ -203,15 +206,23 @@ async def extract_all_profile_from_text(text: str) -> dict:
             return json.loads(raw_content)
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "rate_limit" in err_str.lower() or "limit reached" in err_str.lower():
-                if attempt < max_retries - 1:
-                    logger.warning(f"Rate limit hit in extract_all_profile_from_text (attempt {attempt + 1}/{max_retries}). Waiting {delay}s and retrying... Error: {e}")
-                    await asyncio.sleep(delay)
-                    delay *= 1.5
-                    continue
+            is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "limit reached" in err_str.lower()
+            if is_rate_limit and attempt < max_retries - 1:
+                # Honour the API's "Please try again in Xs" hint when present; the TPM
+                # window is 60s, so clamp the wait into a sensible [delay, 65s] range.
+                wait = delay
+                m = re.search(r"try again in ([\d.]+)s", err_str)
+                if m:
+                    try:
+                        wait = max(delay, min(float(m.group(1)) + 1.0, 65.0))
+                    except ValueError:
+                        pass
+                logger.warning(f"Rate limit in extract_all_profile_from_text (attempt {attempt + 1}/{max_retries}). Waiting {wait:.1f}s and retrying...")
+                await asyncio.sleep(wait)
+                delay = min(delay * 2, 65.0)
+                continue
             logger.error(f"Failed to extract all profile parts (attempt {attempt + 1}/{max_retries}): {e}")
-            if attempt == max_retries - 1:
-                return {}
+            return {}
     return {}
 
 async def extract_business_rules_from_text(text: str) -> dict:
