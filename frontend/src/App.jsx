@@ -201,16 +201,20 @@ function App() {
     }
 
     try {
-      const docs = await fetchJsonSafe(`/api/documents?tenant_id=${currentUser.tenant_id}`, []);
       const profile = await fetchJsonSafe(`/api/tenant/profile/${currentUser.tenant_id}`, {});
 
-      const docsList = Array.isArray(docs) ? docs : [];
-      const hasProfile = Boolean(profile && profile.company_name);
+      // Route on the explicit onboarding_completed flag (set when the owner
+      // confirms their profile). Backward-compat: legacy accounts that finished
+      // onboarding before the flag existed are recognized by a saved company_name.
+      // NOTE: we intentionally do NOT require docs here — an account that has
+      // completed onboarding must reach the dashboard even if its docs were
+      // removed, and an incomplete account (docs but no confirmation, e.g. an
+      // interrupted signup) correctly stays in onboarding.
+      const onboardingDone = Boolean(profile && (profile.onboarding_completed || profile.company_name));
 
-      // The Info step is complete only once a company_name is saved in the profile.
-      setIsNewUser(!hasProfile);
+      setIsNewUser(!onboardingDone);
 
-      if (hasProfile) {
+      if (profile && profile.company_name) {
         const updatedUser = {
           ...currentUser,
           company_name: profile.company_name
@@ -225,7 +229,7 @@ function App() {
         localStorage.setItem('genie_ai_user', JSON.stringify(updatedUser));
       }
 
-      if (docsList.length === 0 || !hasProfile) {
+      if (!onboardingDone) {
         setOnboardingState('onboard_upload');
       } else {
         setOnboardingState('dashboard');

@@ -112,6 +112,10 @@ class TenantProfile(BaseModel):
     webchat_settings: WebchatSettings = WebchatSettings()
     ai_settings: AISettings = AISettings()
     booking_settings: BookingSettings = BookingSettings()
+    # Explicit "the owner finished the onboarding wizard" flag. This is the sole
+    # signal the frontend routes on — never infer completion from company_name,
+    # which leaves accounts that have docs but a blank name stuck in an onboarding loop.
+    onboarding_completed: bool = False
 
 def _get_profile_path(tenant_id: str) -> str:
     return f"data/tenant_profile_{tenant_id}.json"

@@ -25,6 +25,13 @@ UPLOAD_JOB_TTL = 3600  # seconds
 # collected mid-run (leaving the job stuck on "processing" forever).
 _upload_tasks: set = set()
 
+# Serialize the OpenAI-heavy work (Vision OCR + rule extraction) across concurrent
+# uploads. Onboarding often uploads several files at once (topic-split KBs); running
+# every file's OCR+extraction in parallel saturates the OpenAI TPM limit and makes
+# extractions return empty. Processing one file at a time keeps each run under the
+# limit — the UI still polls + merges each file's result as it finishes.
+_upload_job_semaphore = asyncio.Semaphore(1)
+
 
 async def _load_documents_meta() -> list[dict]:
     # ponytail: Use the shared Mongo/JSON adapter here instead of reaching into rag.py.
@@ -56,6 +63,9 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
     Background worker: parse -> index -> progressive rules extraction,
     writing intermediate results to Redis to allow non-blocking UI populating.
     """
+    # Throttle: only one file's OCR+extraction runs at a time (see semaphore note),
+    # so concurrent uploads don't saturate the OpenAI TPM limit.
+    await _upload_job_semaphore.acquire()
     try:
         # 1. Parse text and extract images
         parsed_doc = await parse_pdf(tmp_path, tenant_id=tenant_id)
@@ -130,6 +140,7 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             "detail": "ไม่สามารถประมวลผลและจัดทำดัชนีเอกสารได้ กรุณาลองใหม่อีกครั้ง",
         })
     finally:
+        _upload_job_semaphore.release()
         # Clean up temp file regardless of outcome
         if os.path.exists(tmp_path):
             try:

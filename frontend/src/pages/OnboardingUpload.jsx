@@ -236,6 +236,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   // Step 2 — upload
   const [fileName, setFileName] = useState('');
   const [jobId, setJobId] = useState('');
+  const [jobIds, setJobIds] = useState([]); // all upload jobs (multi-file merged extraction)
 
   // Step 4 — extracted / editable
   const [rawText, setRawText] = useState('');
@@ -258,6 +259,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const pollRef = useRef(null);
+  const mergedRef = useRef(null);      // accumulated extraction across all files
+  const mergedDoneRef = useRef(null);  // set of job ids already merged
   const fileInputRef = useRef(null);
 
   // Prefill from saved profile (company/contact/hours) when returning.
@@ -343,14 +346,14 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     setFileName(files.map((f) => f.name).join(', '));
     setParseError('');
     try {
-      // The FIRST file drives onboarding auto-extraction (services/staff/FAQ…).
-      // The rest are still uploaded and indexed into the RAG corpus in the
-      // background so the AI can answer from all of them — they just don't feed
-      // the wizard's extracted fields.
-      const [primary, ...rest] = files;
-      const primaryJob = await uploadOne(primary);
-      rest.forEach((f) => uploadOne(f).catch(() => {}));
-      setJobId(primaryJob);
+      // Upload every file in parallel and collect ALL job ids. The backend
+      // extracts each file's text independently, so topic-split uploads
+      // (services / staff / promos in separate PDFs) each contribute their
+      // part — the poller below MERGES every job's result into one profile.
+      const ids = (await Promise.all(files.map((f) => uploadOne(f).catch(() => null)))).filter(Boolean);
+      if (!ids.length) throw new Error(t.uploadFailed);
+      setJobIds(ids);
+      setJobId(ids[0]); // keep the primary id for any single-job references
       setStep(2); // auto-advance instantly; parsing continues in background
     } catch (err) {
       setError(err.message === t.uploadFailed ? t.uploadFailed : t.netErr);
@@ -362,54 +365,92 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     startUpload(e.dataTransfer.files);
   };
 
-  // ---- Step 4: poll upload status ----
+  // Merge one file's extracted_json into the running accumulator.
+  // Scalars: keep the first non-empty. Lists: concat + dedupe by a natural key.
+  const mergeExtracted = (base, ext) => {
+    const b = base || {};
+    const dedupe = (arr, keyFn) => {
+      const seen = new Set();
+      return (arr || []).filter((item) => {
+        const k = keyFn(item);
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+    };
+    return {
+      company_name: b.company_name || ext.company_name || '',
+      business_hours: b.business_hours || ext.business_hours || '',
+      contact_number: b.contact_number || ext.contact_number || '',
+      services: dedupe([...(b.services || []), ...(ext.services || [])], (s) => (s.name || '').trim().toLowerCase()),
+      promotions: dedupe([...(b.promotions || []), ...(ext.promotions || [])], (p) => (p.name || JSON.stringify(p)).trim().toLowerCase()),
+      staff: dedupe([...(b.staff || []), ...(ext.staff || [])], (s) => (s.name || '').trim().toLowerCase()),
+      faq: dedupe([...(b.faq || []), ...(ext.faq || [])], (f) => (f.question || '').trim().toLowerCase()),
+      custom_rules: dedupe([...(b.custom_rules || []), ...(ext.custom_rules || [])], (r) => (r.rule || JSON.stringify(r)).trim().toLowerCase()),
+    };
+  };
+
+  // ---- Step 4: poll ALL upload jobs, merging every file's extraction ----
   const beginPolling = () => {
-    if (!jobId) return;
+    if (!jobIds.length) return;
     setParsing(true);
     setParseError('');
     if (pollRef.current) clearInterval(pollRef.current);
+    mergedRef.current = null;
+    mergedDoneRef.current = new Set();
+    const rawParts = {};
+
+    const applyMerged = (m) => {
+      if (m.company_name) setCompanyName(m.company_name);
+      if (m.business_hours) setBusinessHours(m.business_hours);
+      if (m.contact_number) setContactNumber(m.contact_number);
+      if (m.services.length) setServices(m.services);
+      if (m.promotions.length) setPromotions(m.promotions);
+      if (m.staff.length) setStaff(m.staff);
+      if (m.faq.length) setFaq(m.faq);
+      if (m.custom_rules.length) setCustomRules(m.custom_rules);
+    };
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/documents/upload/status/${jobId}`);
-        const data = await res.json().catch(() => ({ status: 'error' }));
-        
-        if (data.extracted_json) {
-          const ext = data.extracted_json;
-          if (ext.company_name && !companyName) setCompanyName(ext.company_name);
-          if (ext.business_hours && !businessHours) setBusinessHours(ext.business_hours);
-          if (ext.contact_number && !contactNumber) setContactNumber(ext.contact_number);
-          if (ext.services && ext.services.length && !services.length) setServices(ext.services);
-          if (ext.promotions && ext.promotions.length && !promotions.length) setPromotions(ext.promotions);
-          if (ext.staff && ext.staff.length && !staff.length) setStaff(ext.staff);
-          if (ext.faq && ext.faq.length && !faq.length) setFaq(ext.faq);
-          if (ext.custom_rules && ext.custom_rules.length && !customRules.length) setCustomRules(ext.custom_rules);
-        }
+        const results = await Promise.all(
+          jobIds.map((id) =>
+            fetch(`/api/documents/upload/status/${id}`)
+              .then((r) => r.json())
+              .catch(() => ({ status: 'error' }))
+          )
+        );
 
-        if (data.progress === 'parsing_done') {
-          setProgressMessage('🤖 AI อ่านข้อความจากคู่มือเสร็จแล้ว เริ่มวิเคราะห์ข้อมูล...');
-        } else if (data.progress === 'basic_done') {
-          setProgressMessage('🤖 AI วิเคราะห์ข้อมูลธุรกิจพื้นฐานเสร็จสิ้น...');
-        } else if (data.progress === 'services_done') {
-          setProgressMessage('🤖 AI ดึงข้อมูลรายการบริการเสร็จเรียบร้อย...');
-        } else if (data.progress === 'staff_done') {
-          setProgressMessage('🤖 AI ดึงตารางเวลางานทีมงานพนักงานแล้ว...');
-        }
+        let anyError = false;
+        let doneCount = 0;
+        results.forEach((data, i) => {
+          const id = jobIds[i];
+          if (data.status === 'done') {
+            doneCount += 1;
+            if (!mergedDoneRef.current.has(id)) {
+              mergedDoneRef.current.add(id);
+              mergedRef.current = mergeExtracted(mergedRef.current, data.extracted_json || {});
+              if (data.raw_text) rawParts[id] = data.raw_text;
+            }
+          } else if (data.status === 'error') {
+            anyError = true;
+          }
+        });
 
-        if (data.status === 'done') {
+        // Live progress + progressive fill from what's merged so far.
+        setProgressMessage(`🤖 AI วิเคราะห์คู่มือแล้ว ${doneCount}/${jobIds.length} ไฟล์...`);
+        if (mergedRef.current) applyMerged(mergedRef.current);
+
+        const allTerminal = results.every((d) => d.status === 'done' || d.status === 'error');
+        if (allTerminal) {
           clearInterval(pollRef.current);
           pollRef.current = null;
-          const ext = data.extracted_json || {};
-          setRawText(data.raw_text || '');
-          setExtractedData(ext);
+          const merged = mergedRef.current || mergeExtracted(null, {});
+          setRawText(Object.values(rawParts).join('\n\n---\n\n'));
+          setExtractedData(merged);
           setShowAutoFillBanner(true);
           setParsing(false);
-          setJobId(null);
-        } else if (data.status === 'error') {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-          setParsing(false);
-          setParseError(t.parseFailed);
+          if (doneCount === 0 && anyError) setParseError(t.parseFailed);
         }
       } catch {
         clearInterval(pollRef.current);
@@ -423,10 +464,10 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   };
 
   useEffect(() => {
-    if (jobId) beginPolling();
+    if (jobIds.length) beginPolling();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  }, [jobIds]);
 
   const applyAutoFill = () => {
     if (!extractedData) return;
@@ -494,7 +535,10 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           promotions: promotions.length ? promotions : (existing.promotions || []),
           staff: staff.length ? staff : (existing.staff || []),
           faq: faq.length ? faq : (existing.faq || []),
-          custom_rules: customRules.length ? customRules : (existing.custom_rules || [])
+          custom_rules: customRules.length ? customRules : (existing.custom_rules || []),
+          // Confirming the profile is the definitive "onboarding done" action —
+          // this flag is what routing uses on future logins (App.jsx).
+          onboarding_completed: true
         })
       });
       if (!res.ok) {
