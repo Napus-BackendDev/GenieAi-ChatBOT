@@ -32,6 +32,7 @@ function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [hasIntervention, setHasIntervention] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
   // Ref (not state) so updating the flagged-session list never re-triggers the
   // polling effect — otherwise a new array each poll caused an infinite fetch loop.
   const flaggedRef = useRef([]);
@@ -74,6 +75,8 @@ function App() {
           
           flaggedRef.current = newFlaggedIds;
           setHasIntervention(needsHelp);
+          const totalUnread = sessionsList.reduce((acc, s) => acc + (s.unread || 0), 0);
+          setHasUnread(totalUnread > 0);
         }
       } catch (err) {
         console.error("Failed to check intervention status:", err);
@@ -375,6 +378,7 @@ function App() {
         isCollapsed={isSidebarCollapsed}
         setIsCollapsed={setIsSidebarCollapsed}
         hasIntervention={hasIntervention}
+        hasUnread={hasUnread}
       />
 
 

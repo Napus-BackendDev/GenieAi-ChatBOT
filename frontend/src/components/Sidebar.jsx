@@ -1,7 +1,7 @@
 import { LayoutDashboard, CalendarCheck, MessageSquare, LogOut, Store, Settings, HelpCircle, Users, Tag, Grid, MessageCircle, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 import { Button } from '@heroui/react';
 
-const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, setIsCollapsed, hasIntervention }) => {
+const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, setIsCollapsed, hasIntervention, hasUnread }) => {
   const menuNames = {
     th: {
       overview: 'แดชบอร์ด',
@@ -117,6 +117,9 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
                       !
                     </span>
                   )}
+                  {item.id === 'chat' && hasUnread && !showWarning && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-rose-500 border border-[#1A365D] shadow-sm animate-pulse"></span>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center w-full relative">
@@ -132,6 +135,9 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
                     >
                       !
                     </span>
+                  )}
+                  {item.id === 'chat' && hasUnread && !showWarning && (
+                    <span className="ml-auto w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm shadow-rose-500/50 animate-pulse shrink-0"></span>
                   )}
                 </div>
               )}
