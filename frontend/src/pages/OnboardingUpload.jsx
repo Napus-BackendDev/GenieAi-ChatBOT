@@ -249,6 +249,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const [parseError, setParseError] = useState('');
   const [showMore, setShowMore] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [extractedData, setExtractedData] = useState(null);
+  const [showAutoFillBanner, setShowAutoFillBanner] = useState(false);
 
   const [lineConfigured, setLineConfigured] = useState(false);
   const [facebookConfigured, setFacebookConfigured] = useState(false);
@@ -359,14 +361,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           pollRef.current = null;
           const ext = data.extracted_json || {};
           setRawText(data.raw_text || '');
-          if (ext.company_name && !companyName) setCompanyName(ext.company_name);
-          if (ext.business_hours) setBusinessHours(ext.business_hours);
-          if (ext.contact_number && !contactNumber) setContactNumber(ext.contact_number);
-          setServices(ext.services || []);
-          setPromotions(ext.promotions || []);
-          setStaff(ext.staff || []);
-          setFaq(ext.faq || []);
-          setCustomRules(ext.custom_rules || []);
+          setExtractedData(ext);
+          setShowAutoFillBanner(true);
           setParsing(false);
           setJobId(null);
         } else if (data.status === 'error') {
@@ -387,10 +383,24 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   };
 
   useEffect(() => {
-    if (step === 3 && jobId) beginPolling();
+    if (jobId) beginPolling();
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, jobId]);
+  }, [jobId]);
+
+  const applyAutoFill = () => {
+    if (!extractedData) return;
+    const ext = extractedData;
+    if (ext.company_name) setCompanyName(ext.company_name);
+    if (ext.business_hours) setBusinessHours(ext.business_hours);
+    if (ext.contact_number) setContactNumber(ext.contact_number);
+    if (ext.services && ext.services.length) setServices(ext.services);
+    if (ext.promotions && ext.promotions.length) setPromotions(ext.promotions);
+    if (ext.staff && ext.staff.length) setStaff(ext.staff);
+    if (ext.faq && ext.faq.length) setFaq(ext.faq);
+    if (ext.custom_rules && ext.custom_rules.length) setCustomRules(ext.custom_rules);
+    setShowAutoFillBanner(false);
+  };
 
   // ---- generic list helpers ----
   const addService = () => setServices([...services, { name: '', price: 0, duration: 30 }]);
@@ -548,6 +558,56 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           </div>
         </div>
 
+        {/* Background parsing / Auto-fill alerts */}
+        {jobId && parsing && (
+          <div className="mt-5 bg-blue-50 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-800/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-left animate-pulse">
+            <div className="flex items-center gap-3">
+              <RefreshCw size={18} className="text-[#2B6CB0] animate-spin shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-blue-900 dark:text-blue-200">🤖 AI กำลังอ่านคู่มือของคุณในหลังบ้าน...</h4>
+                <p className="text-[10px] text-blue-500/80 mt-0.5">คุณสามารถตั้งค่าขั้นตอนอื่นต่อได้ทันที ข้อมูลจะถูกวิเคราะห์อัตโนมัติในแถบถัดไป</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showAutoFillBanner && extractedData && (
+          <div className="mt-5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/30 rounded-2xl p-4 flex items-center justify-between gap-4 text-left animate-fade-in shadow-sm">
+            <div className="flex items-center gap-3">
+              <Sparkles size={18} className="text-emerald-500 shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-200">✨ AI อ่านคู่มือเสร็จเรียบร้อยแล้ว!</h4>
+                <p className="text-[10px] text-emerald-500/80 mt-0.5">
+                  เราวิเคราะห์พบบริการ {extractedData.services?.length || 0} รายการ และข้อมูลพนักงาน {extractedData.staff?.length || 0} คน...
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button onClick={applyAutoFill} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] h-8 px-3.5 cursor-pointer">
+                กรอกข้อมูลอัตโนมัติ
+              </Button>
+              <button onClick={() => setShowAutoFillBanner(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold px-1.5 py-1 cursor-pointer">
+                ❌
+              </button>
+            </div>
+          </div>
+        )}
+
+        {parseError && (
+          <div className="mt-5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200/60 dark:border-rose-800/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-left animate-fade-in">
+            <div className="flex items-center gap-3">
+              <AlertCircle size={18} className="text-rose-500 shrink-0" />
+              <div>
+                <h4 className="text-xs font-bold text-rose-900 dark:text-rose-200">⚠️ AI ไม่สามารถวิเคราะห์คู่มือได้</h4>
+                <p className="text-[10px] text-rose-500/80 mt-0.5">{parseError}</p>
+              </div>
+            </div>
+            <Button onClick={() => { setStep(1); setParseError(''); }} size="sm" className="bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-lg text-[10px] h-8 px-3.5 cursor-pointer shrink-0">
+              อัปโหลดใหม่
+            </Button>
+          </div>
+        )}
+
         {/* Panel container */}
         <div className="my-auto py-8 w-full max-w-[880px] mx-auto">
 
@@ -616,29 +676,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           {/* STEPS 3-8: Review Flow */}
           {step >= 3 && step <= 8 && (
             <div className="animate-fade-in flex flex-col gap-6">
-              {parsing ? (
-                <div className="bg-white dark:bg-slate-900/60 border border-[#A2D9E8]/35 dark:border-white/5 rounded-3xl p-12 shadow-sm flex flex-col items-center gap-4 text-center">
-                  <div className="bg-[#E6F4F8] dark:bg-[#2B6CB0]/20 rounded-full w-16 h-16 flex items-center justify-center text-[#2B6CB0] dark:text-cyan-300">
-                    <RefreshCw size={26} className="animate-spin" />
-                  </div>
-                  <h2 className="text-lg font-extrabold text-[#1A365D] dark:text-white">{t.reviewReading}</h2>
-                  <p className="text-xs text-slate-400 leading-relaxed max-w-[380px]">{t.reviewReadingSub}</p>
-                </div>
-              ) : parseError ? (
-                <div className="bg-white dark:bg-slate-900/60 border border-[#E53E3E]/25 rounded-3xl p-12 shadow-sm flex flex-col items-center gap-4 text-center">
-                  <div className="bg-[#E53E3E]/10 rounded-full w-16 h-16 flex items-center justify-center text-[#E53E3E]">
-                    <AlertCircle size={26} />
-                  </div>
-                  <p className="text-sm font-semibold text-[#E53E3E] max-w-[380px]">{parseError}</p>
-                  <div className="flex gap-3">
-                    <Button onClick={() => setStep(1)}
-                      className="bg-white dark:bg-slate-900 border border-[#2B6CB0]/30 text-[#2B6CB0] font-semibold rounded-xl h-11 px-5 hover:bg-[#2B6CB0]/5 cursor-pointer flex items-center gap-2">
-                      <RefreshCw size={16} /> {t.retry}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
+              <>
                   <div className="flex items-start gap-3">
                     <div className="bg-[#38A169]/10 rounded-full w-11 h-11 flex items-center justify-center text-[#38A169] shrink-0 mt-0.5">
                       <Sparkles size={20} />
@@ -803,8 +841,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                       </div>
                     )}
                   </div>
-                </>
-              )}
+              </>
             </div>
           )}
 
