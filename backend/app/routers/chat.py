@@ -205,6 +205,10 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
                     # Check if session requires human intervention
                     requires_human = await redis_client.exists(f"human_intervention:{tenant_id}:{s_id}")
                     
+                    # Fetch unread messages count
+                    unread_val = await redis_client.get(f"unread:{tenant_id}:{s_id}")
+                    unread_count = int(unread_val.decode("utf-8")) if unread_val else 0
+                    
                     # Get last message details
                     last_msg = history[-1] if history else {"role": "assistant", "content": ""}
                     real_chats.append({
@@ -213,7 +217,7 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
                         "avatar": profile.get("pictureUrl") or f"https://api.dicebear.com/7.x/bottts/svg?seed={s_id}",
                         "lastMessage": last_msg["content"],
                         "time": "Active now",
-                        "unread": False,
+                        "unread": unread_count,
                         "history": history,
                         "requires_human": bool(requires_human)
                     })
@@ -296,3 +300,28 @@ async def resume_ai(req: AIModeRequest, current_tenant: str = Depends(get_curren
     except Exception as e:
         logger.error(f"Error resuming AI for {session_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to resume AI.")
+
+
+class ClearUnreadRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/clear-unread")
+async def clear_unread(req: ClearUnreadRequest, current_tenant: str = Depends(get_current_tenant)):
+    """
+    Clears the unread message count for a session.
+    """
+    from app.core.redis import get_redis
+    session_id = req.session_id.strip()
+    tenant_id = current_tenant
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    try:
+        redis_client = get_redis()
+        await redis_client.delete(f"unread:{tenant_id}:{session_id}")
+        logger.info(f"Cleared unread badge count for session {session_id} (tenant {tenant_id}).")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error clearing unread for {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear unread.")
+

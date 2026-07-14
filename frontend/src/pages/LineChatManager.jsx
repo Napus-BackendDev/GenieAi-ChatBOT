@@ -83,6 +83,23 @@ const LineChatManager = ({ tenantId, lang }) => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedSession?.history]);
 
+  const handleSelectSession = async (session) => {
+    setSelectedSession(session);
+    // Clear unread in frontend state immediately to feel snappy
+    setSessions(prev => prev.map(s => s.id === session.id ? { ...s, unread: 0 } : s));
+    
+    // Call backend to clear unread key in Redis
+    try {
+      await fetch('/api/chat/clear-unread', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: session.id })
+      });
+    } catch (err) {
+      console.error("Failed to clear unread:", err);
+    }
+  };
+
   const handleSendReply = async (e) => {
     e.preventDefault();
     if (!replyText.trim() || !selectedSession || sending) return;
@@ -229,7 +246,7 @@ const LineChatManager = ({ tenantId, lang }) => {
               return (
                 <div
                   key={session.id}
-                  onClick={() => setSelectedSession(session)}
+                  onClick={() => handleSelectSession(session)}
                   className={`p-4 flex gap-3.5 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 cursor-pointer transition-all relative ${
                     isSelected ? 'bg-[#E6F4F8]/60 dark:bg-slate-800 border-l-3 border-[#2B6CB0]' : ''
                   }`}
@@ -262,9 +279,11 @@ const LineChatManager = ({ tenantId, lang }) => {
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate leading-relaxed">
                         {session.lastMessage}
                       </p>
-                      {session.unread && (
-                        <span className="w-2 h-2 rounded-full bg-success shrink-0 ml-1.5 shadow-sm shadow-success/50"></span>
-                      )}
+                      {session.unread && session.unread > 0 ? (
+                        <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-rose-500 text-white font-extrabold text-[9px] px-1 shrink-0 ml-1.5 shadow-sm shadow-rose-500/20">
+                          {session.unread}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                 </div>

@@ -348,6 +348,13 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
     from app.core.redis import get_redis
     redis_client = get_redis()
 
+    # Increment unread messages count for the admin dashboard
+    try:
+        await redis_client.incr(f"unread:{tenant_id}:{user_id}")
+        await redis_client.expire(f"unread:{tenant_id}:{user_id}", 604800)
+    except Exception as e:
+        logger.warning(f"Failed to increment unread for {tenant_id}:{user_id}: {e}")
+
     is_human_active = await redis_client.exists(f"human_intervention:{tenant_id}:{user_id}")
     if is_human_active:
         logger.info(f"Session {user_id} is in human intervention mode. Bypassing AI response.")

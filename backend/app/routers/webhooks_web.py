@@ -63,6 +63,13 @@ async def generate_ai_bubbles(
     from app.core.redis import get_redis
     redis_client = get_redis()
 
+    # Increment unread messages count for the admin dashboard
+    try:
+        await redis_client.incr(f"unread:{tenant_id}:{session_id}")
+        await redis_client.expire(f"unread:{tenant_id}:{session_id}", 604800)
+    except Exception as e:
+        logger.warning(f"Failed to increment unread for {tenant_id}:{session_id}: {e}")
+
     # Honor the human-intervention pause flag (set by AI [[HANDOFF]] or the
     # dashboard pause endpoint). When paused, record the inbound message so the
     # admin sees it in live chat, but do not generate an AI reply.
