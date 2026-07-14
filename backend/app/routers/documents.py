@@ -177,19 +177,31 @@ async def extract_all_profile_from_text(text: str) -> dict:
         f"ข้อความ:\n{text}"
     )
 
-    try:
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0
-        )
-        raw_content = response.choices[0].message.content.strip()
-        if raw_content.startswith("```"):
-            raw_content = raw_content.replace("```json", "").replace("```", "").strip()
-        return json.loads(raw_content)
-    except Exception as e:
-        logger.error(f"Failed to extract all profile parts: {e}")
-        return {}
+    max_retries = 3
+    delay = 2.0
+    for attempt in range(max_retries):
+        try:
+            response = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0
+            )
+            raw_content = response.choices[0].message.content.strip()
+            if raw_content.startswith("```"):
+                raw_content = raw_content.replace("```json", "").replace("```", "").strip()
+            return json.loads(raw_content)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "rate_limit" in err_str.lower() or "limit reached" in err_str.lower():
+                if attempt < max_retries - 1:
+                    logger.warning(f"Rate limit hit in extract_all_profile_from_text (attempt {attempt + 1}/{max_retries}). Waiting {delay}s and retrying... Error: {e}")
+                    await asyncio.sleep(delay)
+                    delay *= 1.5
+                    continue
+            logger.error(f"Failed to extract all profile parts (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                return {}
+    return {}
 
 async def extract_business_rules_from_text(text: str) -> dict:
     """
