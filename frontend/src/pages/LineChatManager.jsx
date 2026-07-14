@@ -514,13 +514,7 @@ const LineChatManager = ({ tenantId, lang }) => {
                         {msg.content}
                       </div>
                     )}
-                    
-                    {/* Delivery status: double green checkmarks for assistant/admin messages */}
-                    {isAssistant && (
-                      <div className="flex items-center gap-1 mt-1 px-1">
-                        <CheckCheck size={11} className="text-[#38A169]" />
-                      </div>
-                    )}
+
                   </div>
                 </div>
               );
