@@ -508,20 +508,18 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
             push_messages.extend(image_messages)
         await push_to_line(user_id, push_messages, access_token=access_token)
 
-def get_active_tenant_id() -> str:
+async def get_active_tenant_id() -> str:
     """
-    Dynamically retrieves the tenant_id of the registered user from users.json,
+    Dynamically retrieves the tenant_id of the registered user from the database adapter,
     falling back to 'default' if empty or not found.
     """
-    users_path = "data/users.json"
-    if os.path.exists(users_path):
-        try:
-            with open(users_path, "r", encoding="utf-8") as f:
-                users = json.load(f)
-                if users and len(users) > 0:
-                    return users[0].get("tenant_id", "default")
-        except Exception as e:
-            logger.error(f"Error reading users.json in webhook: {e}")
+    from app.core.db import db_load_users
+    try:
+        users = await db_load_users()
+        if users and len(users) > 0:
+            return users[0].get("tenant_id", "default")
+    except Exception as e:
+        logger.error(f"Error reading users database in webhook: {e}")
     return "default"
 
 @router.post("/line")
@@ -533,7 +531,7 @@ async def line_webhook(
     """
     Fallback endpoint for incoming LINE webhook events (routes to active tenant).
     """
-    active_tenant_id = get_active_tenant_id()
+    active_tenant_id = await get_active_tenant_id()
     _, secret = await get_tenant_line_credentials(active_tenant_id)
     
     body = await request.body()

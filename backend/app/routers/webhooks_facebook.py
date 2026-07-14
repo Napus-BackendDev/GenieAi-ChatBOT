@@ -171,7 +171,7 @@ async def facebook_webhook(
 
     # ponytail: single-tenant for now, same as the LINE webhook. Per-channel tenant
     # mapping (FB Page ID -> tenant_id) goes here when multi-tenant routing ships.
-    tenant_id = get_active_tenant_id()
+    tenant_id = await get_active_tenant_id()
 
     for event in parse_messaging_events(payload):
         background_tasks.add_task(
