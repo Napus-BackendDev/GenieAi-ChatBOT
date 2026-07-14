@@ -154,13 +154,14 @@ const SettingsPage = ({ tenantId, lang }) => {
 
   const webhookUrls = (() => {
     let base = window.location.origin;
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isLocalhost) {
       base = 'https://genieai-chatbot.onrender.com';
     }
     return {
       line: `${base}/api/webhooks/line/${tenantId}`,
       facebook: `${base}/api/webhooks/facebook/${tenantId}`,
-      isLocalhost: false
+      isLocalhost: false // Render URL is public and valid, no need to warn
     };
   })();
 

@@ -85,7 +85,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Webhook URL: on localhost dev map port 5173 -> backend 8000, otherwise use current origin.
+  // Webhook URL: on localhost dev use deployed Render backend, otherwise use current origin.
   const webhookUrl = (() => {
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       return `https://genieai-chatbot.onrender.com/api/webhooks/line/${tenantId}`;
@@ -93,7 +93,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
     return `${window.location.origin}/api/webhooks/line/${tenantId}`;
   })();
 
-  const isLocalWebhook = false;
+  const isLocalWebhook = false; // Render URL is always public and valid, no need to show local warning for localhost.
 
   useEffect(() => {
     let cancelled = false;

@@ -15,7 +15,8 @@ const buildWebhookBase = () => {
   return base;
 };
 
-const isLocalHost = () => false;
+const isLocalHost = () =>
+  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
 const T = {
   th: {
