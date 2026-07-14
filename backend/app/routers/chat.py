@@ -181,46 +181,40 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
     Get all active chat sessions for the AUTHENTICATED tenant.
     """
     from app.core.redis import get_redis
+    from app.core.db import db_list_conversations
     try:
         redis_client = get_redis()
-        # Scan keys
-        keys = await redis_client.keys(f"chat_history:{tenant_id}:*")
-        
+        # Durable source of truth for the inbox — survives the 2h Redis TTL.
+        conversations = await db_list_conversations(tenant_id)
+
         real_chats = []
-        for key in keys:
-            key_str = key.decode("utf-8") if isinstance(key, bytes) else key
-            parts = key_str.split(":")
-            if len(parts) >= 3:
-                s_id = parts[2]
-                # Skip sandbox session to avoid showing sandbox tests in the LINE list
-                if "sandbox" in s_id:
-                    continue
-                history = await get_chat_history(session_id=s_id, tenant_id=tenant_id)
-                if history:
-                    # Resolve real profile name and avatar from LINE API
-                    profile = await get_line_user_profile(s_id, tenant_id)
-                    display_name = profile.get("displayName") or f"LINE User ({s_id[:8]})"
-                    if not display_name.endswith(" (LINE)"):
-                        display_name = f"{display_name} (LINE)"
-                    # Check if session requires human intervention
-                    requires_human = await redis_client.exists(f"human_intervention:{tenant_id}:{s_id}")
-                    
-                    # Fetch unread messages count
-                    unread_val = await redis_client.get(f"unread:{tenant_id}:{s_id}")
-                    unread_count = int(unread_val.decode("utf-8")) if unread_val else 0
-                    
-                    # Get last message details
-                    last_msg = history[-1] if history else {"role": "assistant", "content": ""}
-                    real_chats.append({
-                        "id": s_id,
-                        "name": display_name,
-                        "avatar": profile.get("pictureUrl") or f"https://api.dicebear.com/7.x/bottts/svg?seed={s_id}",
-                        "lastMessage": last_msg["content"],
-                        "time": "Active now",
-                        "unread": unread_count,
-                        "history": history,
-                        "requires_human": bool(requires_human)
-                    })
+        for conv in conversations:
+            s_id = conv.get("session_id")
+            if not s_id or "sandbox" in s_id:
+                continue
+            history = conv.get("messages", [])
+            if not history:
+                continue
+            # Resolve real profile name and avatar from LINE API
+            profile = await get_line_user_profile(s_id, tenant_id)
+            display_name = profile.get("displayName") or f"LINE User ({s_id[:8]})"
+            if not display_name.endswith(" (LINE)"):
+                display_name = f"{display_name} (LINE)"
+            # Live flags still come from Redis (short-lived by nature)
+            requires_human = await redis_client.exists(f"human_intervention:{tenant_id}:{s_id}")
+            unread_val = await redis_client.get(f"unread:{tenant_id}:{s_id}")
+            unread_count = int(unread_val.decode("utf-8")) if unread_val else 0
+
+            real_chats.append({
+                "id": s_id,
+                "name": display_name,
+                "avatar": profile.get("pictureUrl") or f"https://api.dicebear.com/7.x/bottts/svg?seed={s_id}",
+                "lastMessage": conv.get("last_message", history[-1].get("content", "")),
+                "time": conv.get("updated_at", "Active now"),
+                "unread": unread_count,
+                "history": history,
+                "requires_human": bool(requires_human)
+            })
         return real_chats
     except Exception as e:
         logger.error(f"Error listing chat sessions: {e}")

@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import threading
+from datetime import datetime
 from app.core.mongodb import get_mongo_db
 from app.core.config import settings
 
@@ -12,6 +13,7 @@ _users_lock = threading.Lock()
 _tenant_lock = threading.Lock()
 _bookings_lock = threading.Lock()
 _documents_lock = threading.Lock()
+_conversations_lock = threading.Lock()
 
 # JSON file paths
 def _get_users_file_path() -> str:
@@ -367,3 +369,128 @@ async def db_delete_tenant_data(tenant_id: str) -> None:
                     json.dump(docs, f, ensure_ascii=False, indent=2)
             except Exception as e:
                 logger.error(f"Error deleting tenant documents metadata from documents.json: {e}")
+
+
+# ==========================================
+# 5. Conversations Module (Collection: conversations)
+# Durable chat inbox — Redis holds the AI's short-term context (2h TTL, last N
+# messages); this stores the FULL conversation permanently so the dashboard inbox
+# never loses messages. One document per (tenant_id, session_id).
+# ==========================================
+
+def _conversations_file_path() -> str:
+    return getattr(settings, "CONVERSATIONS_JSON_PATH", "data/conversations.json")
+
+
+def _load_conversations_json() -> list:
+    file_path = _conversations_file_path()
+    _ensure_dir_for_file(file_path)
+    if not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.error(f"Error loading conversations JSON: {e}")
+        return []
+
+
+def _save_conversations_json(convos: list) -> None:
+    file_path = _conversations_file_path()
+    _ensure_dir_for_file(file_path)
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(convos, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving conversations JSON: {e}")
+
+
+async def db_append_message(tenant_id: str, session_id: str, role: str, content: str, channel: str = None) -> None:
+    """Append one message to the durable conversation. Best-effort: never raise
+    (a persistence hiccup must not break the live chat / webhook reply)."""
+    now = datetime.utcnow().isoformat() + "Z"
+    msg = {"role": role, "content": content, "ts": now}
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            set_on_insert = {"created_at": now}
+            if channel:
+                set_on_insert["channel"] = channel
+            await db.conversations.update_one(
+                {"tenant_id": tenant_id, "session_id": session_id},
+                {
+                    "$push": {"messages": msg},
+                    "$set": {"last_message": content, "last_role": role, "updated_at": now},
+                    "$inc": {"message_count": 1},
+                    "$setOnInsert": set_on_insert,
+                },
+                upsert=True,
+            )
+            return
+        except Exception as e:
+            logger.error(f"Error appending message to MongoDB conversations: {e}")
+
+    # ponytail: JSON fallback keeps the durable inbox working without MongoDB.
+    with _conversations_lock:
+        convos = _load_conversations_json()
+        conv = next((c for c in convos if c.get("tenant_id") == tenant_id and c.get("session_id") == session_id), None)
+        if conv is None:
+            conv = {"tenant_id": tenant_id, "session_id": session_id, "messages": [],
+                    "message_count": 0, "created_at": now, "channel": channel}
+            convos.append(conv)
+        conv.setdefault("messages", []).append(msg)
+        conv["message_count"] = len(conv["messages"])
+        conv["last_message"] = content
+        conv["last_role"] = role
+        conv["updated_at"] = now
+        _save_conversations_json(convos)
+
+
+async def db_list_conversations(tenant_id: str) -> list[dict]:
+    """All conversations for a tenant, newest activity first (for the inbox list)."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            cursor = db.conversations.find({"tenant_id": tenant_id}).sort("updated_at", -1)
+            return [_clean_mongo_doc(c) for c in await cursor.to_list(length=1000)]
+        except Exception as e:
+            logger.error(f"Error listing conversations from MongoDB: {e}")
+
+    with _conversations_lock:
+        convos = [c for c in _load_conversations_json() if c.get("tenant_id") == tenant_id]
+    convos.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
+    return convos
+
+
+async def db_get_conversation(tenant_id: str, session_id: str) -> dict | None:
+    """Full message history for one session."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            doc = await db.conversations.find_one({"tenant_id": tenant_id, "session_id": session_id})
+            return _clean_mongo_doc(doc) if doc else None
+        except Exception as e:
+            logger.error(f"Error loading conversation from MongoDB: {e}")
+
+    with _conversations_lock:
+        return next((c for c in _load_conversations_json()
+                     if c.get("tenant_id") == tenant_id and c.get("session_id") == session_id), None)
+
+
+async def db_clear_conversation(tenant_id: str, session_id: str) -> bool:
+    """Delete one durable conversation (targeted)."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            res = await db.conversations.delete_one({"tenant_id": tenant_id, "session_id": session_id})
+            return res.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting conversation from MongoDB: {e}")
+
+    with _conversations_lock:
+        convos = _load_conversations_json()
+        remaining = [c for c in convos if not (c.get("tenant_id") == tenant_id and c.get("session_id") == session_id)]
+        if len(remaining) == len(convos):
+            return False
+        _save_conversations_json(remaining)
+        return True

@@ -51,8 +51,15 @@ async def _ensure_indexes(db) -> None:
     try:
         await db.users.create_index("tenant_id", unique=True, name="uniq_tenant_id")
         await db.tenant_profiles.create_index("tenant_id", unique=True, name="uniq_tenant_id")
+        # Durable chat inbox: one doc per (tenant, session); list sorted by recency.
+        await db.conversations.create_index(
+            [("tenant_id", 1), ("session_id", 1)], unique=True, name="uniq_tenant_session"
+        )
+        await db.conversations.create_index(
+            [("tenant_id", 1), ("updated_at", -1)], name="tenant_recent"
+        )
     except Exception as e:
-        logger.warning(f"Could not ensure tenant_id unique indexes: {e}")
+        logger.warning(f"Could not ensure indexes: {e}")
 
 
 def get_mongo_db():
