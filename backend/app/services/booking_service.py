@@ -1,9 +1,7 @@
-import os
 import re
 import uuid
 import logging
 import asyncio
-import threading
 from datetime import datetime, timedelta
 from app.services import schedule as sched
 from app.core.db import db_load_bookings, db_save_bookings, db_load_profile
@@ -12,8 +10,7 @@ logger = logging.getLogger(__name__)
 
 # asyncio.Lock (not threading.Lock): these critical sections `await` the DB adapter,
 # which yields the event loop when Mongo is enabled. A threading.Lock held across an
-# await would block the loop thread and deadlock the whole server. threading is still
-# imported for the sync test wrappers below.
+# await would block the loop thread and deadlock the whole server.
 booking_file_lock = asyncio.Lock()
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")

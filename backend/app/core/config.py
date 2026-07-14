@@ -1,6 +1,5 @@
 import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "GenieAI RAG Chatbot"

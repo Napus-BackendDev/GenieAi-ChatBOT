@@ -21,8 +21,6 @@ def _get_users_file_path() -> str:
     except Exception:
         return "data/users.json"
 
-DOCUMENTS_FILE_PATH = "data/documents.json"
-
 # Helper for local JSON files
 def _ensure_dir_for_file(filepath: str) -> None:
     os.makedirs(os.path.dirname(filepath), exist_ok=True)

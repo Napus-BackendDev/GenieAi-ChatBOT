@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from openai import AsyncOpenAI
 from app.core.config import settings
 

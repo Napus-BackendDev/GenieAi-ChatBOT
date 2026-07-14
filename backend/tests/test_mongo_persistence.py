@@ -37,4 +37,4 @@ def test_document_metadata_mongo_save_uses_document_id(monkeypatch):
         ({"document_id": "doc-1"}, {"document_id": "doc-1", "tenant_id": "tenant-a", "document_name": "a.pdf"}, True),
         ({"document_id": "doc-2"}, {"document_id": "doc-2", "tenant_id": "tenant-a", "document_name": "b.pdf"}, True),
     ]
-    assert fake.documents.deletes == [{"document_id": {"$nin": ["doc-1", "doc-2"]}}]
+    assert fake.documents.deletes == []

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks, 
 from app.core.config import settings
 from app.core.security import require_tenant
 from app.services.redis_service import get_chat_history, add_chat_message
-from app.services.rag import query_knowledge_base, retrieve_hybrid_context
+from app.services.rag import retrieve_hybrid_context
 from app.services.openai_service import chat_completion_with_tools
 
 logger = logging.getLogger(__name__)

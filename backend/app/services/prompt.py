@@ -8,8 +8,6 @@ details — services, prices, promotions, staff, FAQ, custom rules — are injec
 at runtime via build_profile_context() from each tenant's own profile. Nothing
 about any specific shop/clinic is hardcoded here.
 """
-import os
-import json
 import logging
 
 logger = logging.getLogger(__name__)

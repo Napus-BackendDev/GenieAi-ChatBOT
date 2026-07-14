@@ -36,31 +36,6 @@ def get_knowledge_collection():
 
 from app.core.db import db_load_documents, db_save_documents, db_delete_document, db_load_profile
 
-# Document Metadata Helpers
-import asyncio
-
-def _load_documents_meta() -> list[dict]:
-    """
-    Load document metadata records.
-    """
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop.run_until_complete(db_load_documents())
-
-def _save_documents_meta(docs: list[dict]) -> None:
-    """
-    Save document metadata records.
-    """
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    loop.run_until_complete(db_save_documents(docs))
-
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
     """
     Splits text into overlapping chunks of defined character length.
