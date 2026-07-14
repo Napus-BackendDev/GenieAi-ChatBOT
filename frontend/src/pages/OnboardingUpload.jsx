@@ -754,7 +754,14 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                         </div>
                         <div className="flex flex-col gap-2.5">
                           {services.length === 0 ? (
-                            <div className={emptyCls}>{t.noServices}</div>
+                            parsing ? (
+                              <div className="py-8 text-center text-[#2B6CB0] font-semibold text-xs flex items-center justify-center gap-2">
+                                <RefreshCw size={14} className="animate-spin" />
+                                <span>🤖 AI กำลังดึงข้อมูลบริการจากคู่มือของคุณ...</span>
+                              </div>
+                            ) : (
+                              <div className={emptyCls}>{t.noServices}</div>
+                            )
                           ) : services.map((s, i) => (
                             <div key={i} className="flex items-center gap-2 w-full">
                               <input placeholder={t.svcNamePh} value={s.name} onChange={(e) => changeService(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
@@ -774,7 +781,16 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                           <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.staffTitle}</h4>
                           <button type="button" onClick={addStaff} className={sectionBtn}><Plus size={10} /> {t.addStaff}</button>
                         </div>
-                        {staff.length === 0 ? <div className={emptyCls}>{t.noStaff}</div> : staff.map((m, i) => (
+                        {staff.length === 0 ? (
+                          parsing ? (
+                            <div className="py-8 text-center text-[#2B6CB0] font-semibold text-xs flex items-center justify-center gap-2">
+                              <RefreshCw size={14} className="animate-spin" />
+                              <span>🤖 AI กำลังวิเคราะห์ข้อมูลพนักงานและตารางเวลา...</span>
+                            </div>
+                          ) : (
+                            <div className={emptyCls}>{t.noStaff}</div>
+                          )
+                        ) : staff.map((m, i) => (
                           <div key={i} className="flex items-center gap-2 w-full">
                             <input placeholder={t.staffNamePh} value={m.name} onChange={(e) => changeStaff(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
                             <input placeholder={t.staffRolePh} value={m.role} onChange={(e) => changeStaff(i, 'role', e.target.value)} className={`w-28 ${rowInput}`} />
@@ -792,7 +808,16 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                           <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.promosTitle}</h4>
                           <button type="button" onClick={addPromo} className={sectionBtn}><Plus size={10} /> {t.addPromo}</button>
                         </div>
-                        {promotions.length === 0 ? <div className={emptyCls}>{t.noPromos}</div> : promotions.map((p, i) => (
+                        {promotions.length === 0 ? (
+                          parsing ? (
+                            <div className="py-8 text-center text-[#2B6CB0] font-semibold text-xs flex items-center justify-center gap-2">
+                              <RefreshCw size={14} className="animate-spin" />
+                              <span>🤖 AI กำลังวิเคราะห์ข้อมูลโปรโมชันและส่วนลด...</span>
+                            </div>
+                          ) : (
+                            <div className={emptyCls}>{t.noPromos}</div>
+                          )
+                        ) : promotions.map((p, i) => (
                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
                             <div className="flex items-center gap-2">
                               <input placeholder={t.promoNamePh} value={p.name} onChange={(e) => changePromo(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
@@ -812,7 +837,16 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                           <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.faqTitle}</h4>
                           <button type="button" onClick={addFaq} className={sectionBtn}><Plus size={10} /> {t.addFaq}</button>
                         </div>
-                        {faq.length === 0 ? <div className={emptyCls}>{t.noFaq}</div> : faq.map((it, i) => (
+                        {faq.length === 0 ? (
+                          parsing ? (
+                            <div className="py-8 text-center text-[#2B6CB0] font-semibold text-xs flex items-center justify-center gap-2">
+                              <RefreshCw size={14} className="animate-spin" />
+                              <span>🤖 AI กำลังเรียบเรียงคำถามที่พบบ่อย (FAQ)...</span>
+                            </div>
+                          ) : (
+                            <div className={emptyCls}>{t.noFaq}</div>
+                          )
+                        ) : faq.map((it, i) => (
                           <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
                             <input placeholder={t.faqQPh} value={it.question} onChange={(e) => changeFaq(i, 'question', e.target.value)} className={`w-full ${rowInput}`} />
                             <div className="flex items-center gap-2">
@@ -832,7 +866,16 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                             <h4 className="text-xs font-bold text-[#1A365D] dark:text-white uppercase tracking-wider">{t.rulesTitle}</h4>
                             <button type="button" onClick={addRule} className={sectionBtn}><Plus size={10} /> {t.addRule}</button>
                           </div>
-                          {customRules.length === 0 ? <div className={emptyCls}>{t.noRules}</div> : customRules.map((it, i) => (
+                          {customRules.length === 0 ? (
+                            parsing ? (
+                              <div className="py-8 text-center text-[#2B6CB0] font-semibold text-xs flex items-center justify-center gap-2">
+                                <RefreshCw size={14} className="animate-spin" />
+                                <span>🤖 AI กำลังสรุปกฎและนโยบายเพิ่มเติม...</span>
+                              </div>
+                            ) : (
+                              <div className={emptyCls}>{t.noRules}</div>
+                            )
+                          ) : customRules.map((it, i) => (
                             <div key={i} className="flex flex-col gap-2 p-3 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/40 dark:border-white/10 rounded-xl">
                               <input placeholder={t.ruleCatPh} value={it.category} onChange={(e) => changeRule(i, 'category', e.target.value)} className={`w-full ${rowInput}`} />
                               <div className="flex items-center gap-2">
