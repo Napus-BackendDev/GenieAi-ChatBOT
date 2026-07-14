@@ -64,6 +64,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+  const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const handleCredentialsSubmit = async (e) => {
     e.preventDefault();
@@ -128,45 +129,47 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
   };
 
   useEffect(() => {
-    // Dynamically load Google Identity Services SDK
+    if (window.google) {
+      setSdkLoaded(true);
+      return;
+    }
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.defer = true;
-    
     script.onload = () => {
-      if (window.google) {
-        window.google.accounts.id.initialize({
-          client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '35939223788-p8j1o73lkmikv13uoh8f2bep2cagmd9p.apps.googleusercontent.com',
-          callback: handleGoogleLoginResponse
-        });
-
-        if (activeTab === 'login') {
-          const btnContainer = document.getElementById('googleBtnContainer');
-          if (btnContainer) {
-            window.google.accounts.id.renderButton(
-              btnContainer,
-              { 
-                theme: 'outline', 
-                size: 'large', 
-                width: btnContainer.clientWidth || 420,
-                text: 'signin_with'
-              }
-            );
-          }
-        }
-      }
+      setSdkLoaded(true);
     };
-
     document.body.appendChild(script);
-
     return () => {
-      // Clean up script on unmount
       if (document.body.contains(script)) {
         document.body.removeChild(script);
       }
     };
-  }, [activeTab]);
+  }, []);
+
+  useEffect(() => {
+    if (sdkLoaded && window.google) {
+      window.google.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '35939223788-p8j1o73lkmikv13uoh8f2bep2cagmd9p.apps.googleusercontent.com',
+        callback: handleGoogleLoginResponse
+      });
+
+      const btnContainer = document.getElementById('googleBtnContainer');
+      if (btnContainer) {
+        btnContainer.innerHTML = '';
+        window.google.accounts.id.renderButton(
+          btnContainer,
+          { 
+            theme: 'outline', 
+            size: 'large', 
+            width: btnContainer.clientWidth || 420,
+            text: activeTab === 'login' ? 'signin_with' : 'signup_with'
+          }
+        );
+      }
+    }
+  }, [sdkLoaded, activeTab]);
 
   return (
     <div className="flex min-h-screen w-full items-stretch overflow-hidden bg-[#FFFFFF] transition-colors duration-300">
