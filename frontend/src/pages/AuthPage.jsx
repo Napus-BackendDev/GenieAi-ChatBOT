@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Mail, Lock, ArrowRight, Store, Sparkles, BookOpen } from 'lucide-react';
 import { Button } from '@heroui/react';
 
@@ -51,15 +51,22 @@ const translations = {
   }
 };
 
-const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNavigateHome }) => {
+const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNavigateHome, onTabChange }) => {
   const t = translations[lang];
   const [activeTab, setActiveTab] = useState(initialTab); // 'login' or 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const googleBtnRef = useRef(null);
   
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
+
+  useEffect(() => {
+    if (onTabChange) {
+      onTabChange(activeTab);
+    }
+  }, [activeTab]);
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -155,15 +162,14 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         callback: handleGoogleLoginResponse
       });
 
-      const btnContainer = document.getElementById('googleBtnContainer');
-      if (btnContainer) {
-        btnContainer.innerHTML = '';
+      if (googleBtnRef.current) {
+        googleBtnRef.current.innerHTML = '';
         window.google.accounts.id.renderButton(
-          btnContainer,
+          googleBtnRef.current,
           { 
             theme: 'outline', 
             size: 'large', 
-            width: btnContainer.clientWidth || 420,
+            width: googleBtnRef.current.clientWidth || 420,
             text: activeTab === 'login' ? 'signin_with' : 'signup_with'
           }
         );
@@ -232,7 +238,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
 
               {/* Google Button Container (loads official GSI iframe) */}
               <div className="w-full flex flex-col gap-2">
-                <div id="googleBtnContainer" className="w-full min-h-[44px] flex justify-center"></div>
+                <div ref={googleBtnRef} className="w-full min-h-[44px] flex justify-center"></div>
                 <button
                   type="button"
                   onClick={() => handleGoogleLoginResponse({ credential: 'mock' })}

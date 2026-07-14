@@ -97,18 +97,34 @@ function App() {
   useEffect(() => {
     if (onboardingState === 'dashboard') {
       window.history.replaceState(null, '', `#${activeTab}`);
-    } else if (window.location.hash) {
+    } else if (onboardingState === 'auth') {
+      const hash = authInitialTab === 'signup' ? '#register' : '#login';
+      window.history.replaceState(null, '', hash);
+    } else if (window.location.hash && !['#login', '#register'].includes(window.location.hash)) {
       window.history.replaceState(null, '', window.location.pathname);
     }
-  }, [activeTab, onboardingState]);
+  }, [activeTab, onboardingState, authInitialTab]);
 
-  // Read URL hash on load to restore the correct active tab
+  // Read URL hash on load/hashchange to restore the correct active tab/page
   useEffect(() => {
-    const hash = window.location.hash.replace('#', '');
-    const validTabs = ['overview', 'analytics', 'service', 'info', 'promotions', 'faq', 'staff', 'bookings', 'chat', 'sandbox', 'settings'];
-    if (hash && validTabs.includes(hash)) {
-      setActiveTab(hash);
-    }
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '');
+      const validTabs = ['overview', 'analytics', 'service', 'info', 'promotions', 'faq', 'staff', 'bookings', 'chat', 'sandbox', 'settings'];
+      
+      if (hash === 'login') {
+        setOnboardingState('auth');
+        setAuthInitialTab('login');
+      } else if (hash === 'register' || hash === 'signup') {
+        setOnboardingState('auth');
+        setAuthInitialTab('signup');
+      } else if (hash && validTabs.includes(hash)) {
+        setActiveTab(hash);
+      }
+    };
+
+    handleHashChange();
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
 
@@ -259,6 +275,7 @@ function App() {
           onAuthSuccess={handleAuthSuccess} 
           initialTab={authInitialTab}
           onNavigateHome={() => setOnboardingState('home')}
+          onTabChange={(tab) => setAuthInitialTab(tab)}
         />
       </div>
     );
