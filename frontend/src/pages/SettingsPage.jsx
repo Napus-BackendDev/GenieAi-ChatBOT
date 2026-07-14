@@ -127,6 +127,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
 
   // Connection status flags (secrets are NEVER returned by GET; only these booleans).
   const [lineConfigured, setLineConfigured] = useState(false);
+  const [lineVerified, setLineVerified] = useState(false);
   const [facebookConfigured, setFacebookConfigured] = useState(false);
 
   // LINE "test connection" result state.
@@ -177,6 +178,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
         // Never prefill token/secret inputs; keep them empty so the user must
         // re-type only when they want to change something.
         setLineConfigured(!!data.line_configured);
+        setLineVerified(!!data.line_verified);
         setFacebookConfigured(!!data.facebook_configured);
         setSettings({
           line_channel_access_token: '',
@@ -268,7 +270,9 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
       });
       const data = await res.json();
       setLineTest({ testing: false, result: data });
+      setLineVerified(!!data.valid);
     } catch {
+      setLineVerified(false);
       setLineTest({ testing: false, result: { valid: false, error: t.lineTestFailDefault } });
     }
   };
