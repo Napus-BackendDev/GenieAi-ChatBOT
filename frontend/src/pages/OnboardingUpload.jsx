@@ -78,7 +78,6 @@ const TR = {
     noServices: 'ยังไม่มีรายการบริการ กดเพิ่มบริการได้เลย',
     svcNamePh: 'เช่น ตัดผมชาย',
     svcPricePh: 'บาท',
-    svcDurPh: 'นาที',
     seeMore: 'ดูเพิ่มเติม',
     seeLess: 'ย่อลง',
     moreTitle: 'ข้อมูลเพิ่มเติม (โปรโมชัน, ทีมงาน, คำถามที่พบบ่อย)',
@@ -106,7 +105,7 @@ const TR = {
     ruleTextPh: 'รายละเอียดกฎ',
     advanced: 'ขั้นสูง: ดูข้อความต้นฉบับ',
     rawText: 'ข้อความต้นฉบับจากไฟล์',
-    invalidService: 'กรุณากรอกชื่อบริการให้ครบ และระบุเวลา (มากกว่า 0 นาที) ให้ถูกต้อง',
+    invalidService: 'กรุณากรอกชื่อบริการให้ครบ',
     saveFailed: 'บันทึกข้อมูลไม่สำเร็จ',
     parseFailed: 'อ่านคู่มือไม่สำเร็จ กรุณาลองอัปโหลดใหม่',
     // step 5 done
@@ -182,7 +181,6 @@ const TR = {
     noServices: 'No services yet. Tap add service to start.',
     svcNamePh: 'e.g. Men’s haircut',
     svcPricePh: 'THB',
-    svcDurPh: 'min',
     seeMore: 'See more',
     seeLess: 'See less',
     moreTitle: 'More details (promotions, team, FAQ)',
@@ -210,7 +208,7 @@ const TR = {
     ruleTextPh: 'Rule details',
     advanced: 'Advanced: view original text',
     rawText: 'Original text from your file',
-    invalidService: 'Please fill every service name and set a valid time (> 0 min).',
+    invalidService: 'Please fill every service name.',
     saveFailed: 'Could not save your data.',
     parseFailed: 'Could not read the manual. Please try uploading again.',
     doneTitle: 'All set! 🎉',
@@ -520,7 +518,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   // ---- Step 4: confirm + save profile ----
   const handleConfirm = async () => {
     setError('');
-    const bad = services.find(s => !s.name.trim() || !(Number(s.duration) > 0));
+    const bad = services.find(s => !s.name.trim());
     if (bad) {
       setError(t.invalidService);
       return;
@@ -834,8 +832,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                           ) : services.map((s, i) => (
                             <div key={i} className="flex items-center gap-2 w-full">
                               <input placeholder={t.svcNamePh} value={s.name} onChange={(e) => changeService(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
-                              <input type="text" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-16 ${rowInput}`} />
-                              <input type="number" placeholder={t.svcDurPh} value={s.duration} onChange={(e) => changeService(i, 'duration', e.target.value)} className={`w-16 ${rowInput}`} />
+                              <input type="text" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-28 ${rowInput}`} />
                               <button type="button" onClick={() => removeService(i)} className={delBtn}><Trash2 size={13} /></button>
                             </div>
                           ))}
