@@ -1,6 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Phone, Video, MoreVertical, Paperclip, Mic, Send, CheckCheck, Edit, Filter, User, Bot } from 'lucide-react';
+import { Search, Phone, Video, MoreVertical, Paperclip, Mic, Send, CheckCheck, Edit, Filter, User, Bot, Smile } from 'lucide-react';
 import { Button } from '@heroui/react';
+
+const STICKER_LIST = [
+  { packageId: "446", stickerId: "1988", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1988/android/sticker.png" },
+  { packageId: "446", stickerId: "1989", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1989/android/sticker.png" },
+  { packageId: "446", stickerId: "1990", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1990/android/sticker.png" },
+  { packageId: "446", stickerId: "1991", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1991/android/sticker.png" },
+  { packageId: "446", stickerId: "1992", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1992/android/sticker.png" },
+  { packageId: "446", stickerId: "1993", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1993/android/sticker.png" },
+  { packageId: "446", stickerId: "1994", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1994/android/sticker.png" },
+  { packageId: "446", stickerId: "1995", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/1995/android/sticker.png" },
+  
+  { packageId: "789", stickerId: "10855", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10855/android/sticker.png" },
+  { packageId: "789", stickerId: "10856", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10856/android/sticker.png" },
+  { packageId: "789", stickerId: "10857", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10857/android/sticker.png" },
+  { packageId: "789", stickerId: "10858", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10858/android/sticker.png" },
+  { packageId: "789", stickerId: "10859", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10859/android/sticker.png" },
+  { packageId: "789", stickerId: "10860", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10860/android/sticker.png" },
+  { packageId: "789", stickerId: "10861", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10861/android/sticker.png" },
+  { packageId: "789", stickerId: "10862", preview: "https://stickershop.line-scdn.net/stickershop/v1/sticker/10862/android/sticker.png" }
+];
 
 const translations = {
   th: {
@@ -40,6 +60,7 @@ const LineChatManager = ({ tenantId, lang }) => {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [togglingAI, setTogglingAI] = useState(false);
+  const [showStickers, setShowStickers] = useState(false);
   const chatEndRef = useRef(null);
 
   const fetchSessions = async (showLoading = false) => {
@@ -83,8 +104,61 @@ const LineChatManager = ({ tenantId, lang }) => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedSession?.history]);
 
+  const handleSendSticker = async (packageId, stickerId) => {
+    setShowStickers(false);
+    if (!selectedSession || sending) return;
+    
+    const stickerPayload = `[[STICKER:${packageId}:${stickerId}]]`;
+    setSending(true);
+    
+    const optimisticMessage = { role: 'assistant', content: stickerPayload, timestamp: new Date().toISOString() };
+    const updatedHistory = [...(selectedSession.history || []), optimisticMessage];
+    
+    setSelectedSession(prev => ({
+      ...prev,
+      lastMessage: "ส่งสติกเกอร์ LINE",
+      time: "Active now",
+      history: updatedHistory
+    }));
+
+    setSessions(prev => prev.map(s => {
+      if (s.id === selectedSession.id) {
+        return {
+          ...s,
+          lastMessage: "ส่งสติกเกอร์ LINE",
+          time: "Active now",
+          history: updatedHistory
+        };
+      }
+      return s;
+    }));
+
+    try {
+      const res = await fetch('/api/chat/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: selectedSession.id,
+          message: stickerPayload,
+          tenant_id: tenantId || 'default'
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(t.replyError);
+      }
+      
+      fetchSessions(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleSelectSession = async (session) => {
     setSelectedSession(session);
+    setShowStickers(false);
     // Clear unread in frontend state immediately to feel snappy
     setSessions(prev => prev.map(s => s.id === session.id ? { ...s, unread: 0 } : s));
     
@@ -417,15 +491,29 @@ const LineChatManager = ({ tenantId, lang }) => {
                   className={`flex w-full ${isAssistant ? 'justify-end' : 'justify-start'}`}
                 >
                   <div className={`flex flex-col max-w-[70%] ${isAssistant ? 'items-end' : 'items-start'}`}>
-                    <div
-                      className={`px-4 py-3 text-xs leading-relaxed whitespace-pre-line shadow-sm border ${
-                        isAssistant
-                          ? 'bg-[#E9D8FD] dark:bg-purple-950/80 text-purple-950 dark:text-purple-100 border-purple-200/50 dark:border-purple-900/30 rounded-2xl rounded-tr-none text-left'
-                          : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-none text-left'
-                      }`}
-                    >
-                      {msg.content}
-                    </div>
+                    {msg.content.startsWith('[[STICKER:') && msg.content.endsWith(']]') ? (
+                      (() => {
+                        const parts = msg.content.substring(10, msg.content.length - 2).split(':');
+                        const stickerId = parts[1];
+                        return (
+                          <img 
+                            src={`https://stickershop.line-scdn.net/stickershop/v1/sticker/${stickerId}/android/sticker.png`}
+                            alt="LINE Sticker"
+                            className="w-24 h-24 object-contain my-1 hover:scale-105 transition-transform"
+                          />
+                        );
+                      })()
+                    ) : (
+                      <div
+                        className={`px-4 py-3 text-xs leading-relaxed whitespace-pre-line shadow-sm border ${
+                          isAssistant
+                            ? 'bg-[#E9D8FD] dark:bg-purple-950/80 text-purple-950 dark:text-purple-100 border-purple-200/50 dark:border-purple-900/30 rounded-2xl rounded-tr-none text-left'
+                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200/50 dark:border-white/5 rounded-2xl rounded-tl-none text-left'
+                        }`}
+                      >
+                        {msg.content}
+                      </div>
+                    )}
                     
                     {/* Delivery status: double green checkmarks for assistant/admin messages */}
                     {isAssistant && (
@@ -441,9 +529,34 @@ const LineChatManager = ({ tenantId, lang }) => {
           </div>
 
           {/* Message Composer Box */}
-          <form onSubmit={handleSendReply} className="p-4 border-t border-slate-200/60 dark:border-white/5 bg-white dark:bg-slate-900 flex items-center gap-3 shrink-0">
-            <Button size="sm" isIconOnly variant="light" className="text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-              <Paperclip size={18} />
+          <form onSubmit={handleSendReply} className="p-4 border-t border-slate-200/60 dark:border-white/5 bg-white dark:bg-slate-900 flex items-center gap-3 shrink-0 relative">
+            {showStickers && (
+              <div className="absolute bottom-16 left-4 bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-2xl p-4 shadow-xl w-64 max-h-60 overflow-y-auto z-50 animate-fade-in text-left">
+                <h4 className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">{lang === 'th' ? 'สติกเกอร์ LINE' : 'LINE Stickers'}</h4>
+                <div className="grid grid-cols-4 gap-2">
+                  {STICKER_LIST.map((stk, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSendSticker(stk.packageId, stk.stickerId)}
+                      className="hover:scale-110 active:scale-95 transition-transform p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                    >
+                      <img src={stk.preview} alt="Sticker Preview" className="w-8 h-8 object-contain" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <Button 
+              type="button"
+              size="sm" 
+              isIconOnly 
+              variant="light" 
+              onClick={() => setShowStickers(!showStickers)}
+              className={`hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer ${showStickers ? 'text-[#2B6CB0]' : 'text-slate-400'}`}
+            >
+              <Smile size={18} />
             </Button>
             
             <input
@@ -454,10 +567,6 @@ const LineChatManager = ({ tenantId, lang }) => {
               disabled={sending}
               className="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200/50 dark:border-white/10 rounded-xl px-4 py-2.5 text-xs text-[#1A365D] dark:text-white placeholder:text-slate-400 outline-none transition-all focus:border-[#2B6CB0]"
             />
-
-            <Button size="sm" isIconOnly variant="light" className="text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
-              <Mic size={18} />
-            </Button>
 
             <Button
               type="submit"
