@@ -102,6 +102,8 @@ function App() {
       path = authInitialTab === 'signup' ? '/register' : '/login';
     } else if (onboardingState === 'home') {
       path = '/';
+    } else if (onboardingState === 'onboard_upload') {
+      path = '/onboarding';
     }
     
     if (window.location.pathname !== path) {
@@ -121,6 +123,14 @@ function App() {
       } else if (path === 'register' || path === 'signup') {
         setOnboardingState('auth');
         setAuthInitialTab('signup');
+      } else if (path === 'onboarding') {
+        const savedUser = localStorage.getItem('genie_ai_user');
+        if (savedUser) {
+          setOnboardingState('onboard_upload');
+        } else {
+          setOnboardingState('auth');
+          setAuthInitialTab('login');
+        }
       } else if (path === 'home' || !path) {
         setOnboardingState('home');
       } else if (path && validTabs.includes(path)) {
@@ -183,6 +193,13 @@ function App() {
     const path = window.location.pathname.replace(/^\//, '');
     if (path === 'home' || !path) {
       setOnboardingState('home');
+      setLoading(false);
+      return;
+    }
+
+    // If they explicitly visited '/onboarding', force the state to onboarding and do not redirect to dashboard!
+    if (path === 'onboarding') {
+      setOnboardingState('onboard_upload');
       setLoading(false);
       return;
     }
