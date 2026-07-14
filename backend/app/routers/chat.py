@@ -236,16 +236,31 @@ async def reply_to_session(req: ReplyRequest, current_tenant: str = Depends(get_
     if not message:
         raise HTTPException(status_code=400, detail="Reply message cannot be empty")
         
+    is_sticker = message.startswith("[[STICKER:") and message.endswith("]]")
+
     try:
         # Append message to Redis history
         await add_chat_message(session_id=session_id, role="assistant", content=message, tenant_id=tenant_id)
 
-        # NOTE: sending a reply does NOT resume the AI. The AI stays paused (human
-        # mode) until the admin explicitly resumes it via POST /api/chat/resume.
+        # A STICKER acts as the AI on/off switch: sending any sticker TOGGLES human
+        # mode for this session (first sticker → pause AI / human takes over, next
+        # sticker → resume AI). A plain text reply does NOT change the AI state.
+        requires_human = None
+        if is_sticker:
+            redis_client = get_redis()
+            key = f"human_intervention:{tenant_id}:{session_id}"
+            if await redis_client.exists(key):
+                await redis_client.delete(key)      # was paused → resume AI
+                requires_human = False
+                logger.info(f"Sticker toggle: RESUMED AI for session {session_id} (tenant {tenant_id}).")
+            else:
+                await redis_client.set(key, "1")    # was active → pause (human mode)
+                requires_human = True
+                logger.info(f"Sticker toggle: PAUSED AI for session {session_id} (tenant {tenant_id}).")
 
         # If it's a real LINE user (session_id doesn't start with mock_), push to LINE messaging API
         if not session_id.startswith("mock_"):
-            if message.startswith("[[STICKER:") and message.endswith("]]"):
+            if is_sticker:
                 parts = message[10:-2].split(":")
                 if len(parts) == 2:
                     package_id, sticker_id = parts[0], parts[1]
@@ -259,8 +274,8 @@ async def reply_to_session(req: ReplyRequest, current_tenant: str = Depends(get_
             else:
                 line_message = [{"type": "text", "text": message}]
             await push_to_line(user_id=session_id, messages=line_message)
-            
-        return {"status": "success"}
+
+        return {"status": "success", "requires_human": requires_human}
     except Exception as e:
         logger.error(f"Error in reply_to_session: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send reply: {str(e)}")

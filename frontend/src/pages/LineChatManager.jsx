@@ -147,7 +147,16 @@ const LineChatManager = ({ tenantId, lang }) => {
       if (!res.ok) {
         throw new Error(t.replyError);
       }
-      
+
+      // A sticker toggles the AI on/off — reflect the new state the backend returns
+      // so the "Human mode" pill and banner update immediately.
+      const data = await res.json().catch(() => ({}));
+      if (typeof data.requires_human === 'boolean') {
+        const paused = data.requires_human;
+        setSelectedSession(prev => (prev ? { ...prev, requires_human: paused } : prev));
+        setSessions(prev => prev.map(s => (s.id === selectedSession.id ? { ...s, requires_human: paused } : s)));
+      }
+
       fetchSessions(false);
     } catch (err) {
       console.error(err);
@@ -391,6 +400,20 @@ const LineChatManager = ({ tenantId, lang }) => {
                   {t.activeNow}
                 </span>
               </div>
+            </div>
+
+            {/* Who is replying to the customer right now (clear status, not a button) */}
+            <div
+              className={`hidden sm:flex items-center gap-2 px-3.5 h-8 rounded-full text-[11px] font-bold border ${
+                selectedSession.requires_human
+                  ? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
+                  : 'bg-[#38A169]/10 text-[#38A169] border-[#38A169]/30'
+              }`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${selectedSession.requires_human ? 'bg-amber-500' : 'bg-[#38A169] animate-pulse'}`}></span>
+              {selectedSession.requires_human
+                ? (lang === 'th' ? '🙋 แอดมินกำลังตอบลูกค้า' : '🙋 Admin is replying')
+                : (lang === 'th' ? '🤖 AI กำลังตอบลูกค้า' : '🤖 AI is replying')}
             </div>
 
             <div className="flex items-center gap-1.5">
