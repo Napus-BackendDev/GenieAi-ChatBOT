@@ -10,7 +10,11 @@ from app.core.db import db_load_bookings, db_save_bookings, db_load_profile
 
 logger = logging.getLogger(__name__)
 
-booking_file_lock = threading.Lock()
+# asyncio.Lock (not threading.Lock): these critical sections `await` the DB adapter,
+# which yields the event loop when Mongo is enabled. A threading.Lock held across an
+# await would block the loop thread and deadlock the whole server. threading is still
+# imported for the sync test wrappers below.
+booking_file_lock = asyncio.Lock()
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -149,7 +153,7 @@ async def check_booking_availability(booking_datetime: str, tenant_id: str = "de
                 ),
             }
 
-    with booking_file_lock:
+    async with booking_file_lock:
         bookings = await db_load_bookings()
         conflict = _find_conflict(bookings, target_dt, tenant_id, staff_name, conflict_window_mins)
 
@@ -194,7 +198,7 @@ async def create_booking(
     booking_settings = await _load_booking_settings(tenant_id)
     conflict_window_mins = booking_settings["conflict_window_mins"]
 
-    with booking_file_lock:
+    async with booking_file_lock:
         bookings = await db_load_bookings()
         conflict = _find_conflict(bookings, target_dt, tenant_id, staff_name, conflict_window_mins)
         if conflict is not None:

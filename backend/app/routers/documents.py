@@ -61,10 +61,7 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
         parsed_doc = await parse_pdf(tmp_path, tenant_id=tenant_id)
         parsed_doc["document_name"] = filename  # Use actual filename
 
-        # 2. Index parsed chunks into ChromaDB
-        await index_document(parsed_doc, tenant_id=tenant_id)
-
-        # 3. Concatenate all text pages for rule extraction
+        # 2. Get full raw text
         full_raw_text = "\n\n".join([page.get("text", "") for page in parsed_doc.get("pages", [])])
 
         # Write parsing done status
@@ -74,6 +71,15 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             "document_name": filename,
             "extracted_json": {}
         })
+
+        # 3. Index parsed chunks into ChromaDB (RAG) in the background (non-blocking)
+        async def run_indexing_background():
+            try:
+                await index_document(parsed_doc, tenant_id=tenant_id)
+            except Exception as ex:
+                logger.error(f"Error indexing document {filename} in background: {ex}")
+
+        asyncio.create_task(run_indexing_background())
 
         extracted_json = {}
 

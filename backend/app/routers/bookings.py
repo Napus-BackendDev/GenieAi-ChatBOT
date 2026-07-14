@@ -49,25 +49,23 @@ async def cancel_booking(booking_id: str, tenant_id: str = Depends(get_current_t
             bookings = await res
         else:
             bookings = res
-            
-        new_bookings = []
-        found = False
-        
-        for b in bookings:
-            if b.get("booking_id") == booking_id and b.get("tenant_id") == tenant_id:
-                found = True
-                logger.info(f"Cancelling booking {booking_id} for customer {b.get('customer_name')}")
-                continue
-            new_bookings.append(b)
-            
-        if not found:
+
+        # Verify the booking exists AND belongs to this tenant before deleting.
+        owned = next(
+            (b for b in bookings
+             if b.get("booking_id") == booking_id and b.get("tenant_id") == tenant_id),
+            None,
+        )
+        if owned is None:
             raise HTTPException(status_code=404, detail="Booking not found.")
-            
-        # Write back changes via the async adapter (same event-loop reasoning as _load_bookings)
-        from app.core.db import db_save_bookings
-        save_res = db_save_bookings(new_bookings)
-        if inspect.isawaitable(save_res):
-            await save_res
+
+        logger.info(f"Cancelling booking {booking_id} for customer {owned.get('customer_name')}")
+
+        # Targeted delete by id (never a full-list rewrite that could clobber others).
+        from app.core.db import db_delete_booking
+        del_res = db_delete_booking(booking_id)
+        if inspect.isawaitable(del_res):
+            await del_res
         return {"status": "success", "message": f"Successfully cancelled booking: {booking_id}"}
     except HTTPException:
         raise

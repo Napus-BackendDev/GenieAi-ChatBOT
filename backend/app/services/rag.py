@@ -34,7 +34,7 @@ def get_knowledge_collection():
         metadata={"hnsw:space": "cosine"}
     )
 
-from app.core.db import db_load_documents, db_save_documents, db_load_profile
+from app.core.db import db_load_documents, db_save_documents, db_delete_document, db_load_profile
 
 # Document Metadata Helpers
 import asyncio
@@ -334,21 +334,18 @@ async def delete_document(document_id: str, tenant_id: str = "default") -> bool:
     Ownership is checked FIRST so a caller passing another tenant's
     document_id cannot delete that tenant's ChromaDB chunks.
     """
-    # 1. Verify ownership via documents.json and remove its metadata.
-    found = False
+    # 1. Verify ownership via documents metadata, then delete that one record.
     docs_meta = await db_load_documents()
-    new_docs_meta = []
-    for doc in docs_meta:
-        if doc.get("document_id") == document_id and doc.get("tenant_id") == tenant_id:
-            found = True
-            continue
-        new_docs_meta.append(doc)
-    if found:
-        await db_save_documents(new_docs_meta)
-
+    found = any(
+        doc.get("document_id") == document_id and doc.get("tenant_id") == tenant_id
+        for doc in docs_meta
+    )
     if not found:
         logger.warning(f"Document metadata for '{document_id}' not found under tenant '{tenant_id}'")
         return False
+
+    # Targeted delete by id (no full-list rewrite that could clobber other tenants' docs).
+    await db_delete_document(document_id)
 
     # 2. Delete from ChromaDB, scoped to this tenant (Chroma requires $and for
     # multi-key filters; a flat two-key dict is not valid filter syntax).

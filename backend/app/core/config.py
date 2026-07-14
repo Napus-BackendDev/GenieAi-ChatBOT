@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Google Sign-In: audience check for ID tokens. Blank = Google login disabled.
     GOOGLE_CLIENT_ID: str = ""
 
+    # Dev-only: allow the tokenless "mock" Google login. MUST stay False in any
+    # shared/production deploy — when True, anyone can log in as the mock tenant.
+    ALLOW_MOCK_LOGIN: bool = False
+
     # MongoDB (optional; migration in progress). Leave MONGODB_URI blank to keep
     # using local JSON storage. Set it (in .env) to enable the MongoDB connection.
     MONGODB_URI: str = ""

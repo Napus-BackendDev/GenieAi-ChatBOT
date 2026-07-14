@@ -176,13 +176,13 @@ async def db_save_bookings(bookings: list[dict]) -> None:
     db = _mongo_db_or_none()
     if db is not None:
         try:
-            # ponytail: Treat Mongo as a mirror of the existing full-list save contract.
+            # Upsert-only. We deliberately do NOT reconcile-delete ($nin) here:
+            # if `bookings` came from the JSON fallback after a transient Mongo read
+            # error, a $nin delete would wipe every other tenant's bookings. Explicit
+            # removals go through db_delete_booking().
             for b in bookings:
                 if "booking_id" in b:
                     await db.bookings.replace_one({"booking_id": b["booking_id"]}, b, upsert=True)
-            # Remove any bookings in MongoDB that are no longer in the list (e.g. deleted/cancelled)
-            current_ids = [b["booking_id"] for b in bookings if "booking_id" in b]
-            await db.bookings.delete_many({"booking_id": {"$nin": current_ids}})
             return
         except Exception as e:
             logger.error(f"Error saving bookings to MongoDB: {e}")
@@ -196,6 +196,33 @@ async def db_save_bookings(bookings: list[dict]) -> None:
                 json.dump(bookings, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Error saving bookings JSON: {e}")
+
+
+async def db_delete_booking(booking_id: str) -> bool:
+    """Delete exactly one booking by id. Targeted delete so a stale/partial list
+    can never wipe unrelated bookings (replaces the old $nin reconcile)."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            res = await db.bookings.delete_one({"booking_id": booking_id})
+            return res.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting booking from MongoDB: {e}")
+
+    file_path = settings.BOOKINGS_JSON_PATH
+    with _bookings_lock:
+        _ensure_dir_for_file(file_path)
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                bookings = json.load(f)
+        except Exception:
+            bookings = []
+        remaining = [b for b in bookings if b.get("booking_id") != booking_id]
+        if len(remaining) == len(bookings):
+            return False
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(remaining, f, ensure_ascii=False, indent=2)
+        return True
 
 # ==========================================
 # 4. Documents Metadata Module (Collection: documents)
@@ -230,13 +257,12 @@ async def db_save_documents(docs: list[dict]) -> None:
     db = _mongo_db_or_none()
     if db is not None:
         try:
-            # ponytail: Upsert existing metadata dicts directly; indexing logic remains in rag.py.
+            # Upsert-only (same reasoning as db_save_bookings — no $nin reconcile-delete
+            # that could wipe other tenants' docs from a stale fallback list). Explicit
+            # removals go through db_delete_document().
             for d in docs:
                 if "document_id" in d:
                     await db.documents.replace_one({"document_id": d["document_id"]}, d, upsert=True)
-            # Remove any docs in MongoDB that are no longer in the list (e.g. deleted)
-            current_ids = [d["document_id"] for d in docs if "document_id" in d]
-            await db.documents.delete_many({"document_id": {"$nin": current_ids}})
             return
         except Exception as e:
             logger.error(f"Error saving documents to MongoDB: {e}")
@@ -250,3 +276,29 @@ async def db_save_documents(docs: list[dict]) -> None:
                 json.dump(docs, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Error saving documents JSON: {e}")
+
+
+async def db_delete_document(document_id: str) -> bool:
+    """Delete exactly one document metadata record by id (targeted, no reconcile)."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            res = await db.documents.delete_one({"document_id": document_id})
+            return res.deleted_count > 0
+        except Exception as e:
+            logger.error(f"Error deleting document from MongoDB: {e}")
+
+    file_path = settings.DOCUMENTS_JSON_PATH
+    with _documents_lock:
+        _ensure_dir_for_file(file_path)
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                docs = json.load(f)
+        except Exception:
+            docs = []
+        remaining = [d for d in docs if d.get("document_id") != document_id]
+        if len(remaining) == len(docs):
+            return False
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(remaining, f, ensure_ascii=False, indent=2)
+        return True

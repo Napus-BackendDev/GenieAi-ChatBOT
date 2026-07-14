@@ -111,14 +111,23 @@ async def login(req: LoginRequest):
     provider = req.provider.strip().lower()
     
     if provider == "google":
-        # Google Login
+        from app.core.config import settings
+
+        # Real Google token is REQUIRED. The tokenless "mock" account is a dev-only
+        # backdoor (anyone could get a valid JWT for the shared mock tenant) — it is
+        # refused unless ALLOW_MOCK_LOGIN is explicitly enabled in the environment.
+        is_mock = (not req.token) or req.token == "mock"
+        if is_mock and not settings.ALLOW_MOCK_LOGIN:
+            logger.warning("Refused tokenless/mock Google login (ALLOW_MOCK_LOGIN is off).")
+            raise HTTPException(status_code=401, detail="Google authentication required.")
+
         email = "google_mock_user@example.com"
         phone = "080-000-0000"
         name = "Asus Admin"
         picture = "/avatar.png"
-        
+
         # If a real token is provided, verify it instead of using mock account
-        if req.token and req.token != "mock":
+        if not is_mock:
             payload = await verify_google_token(req.token)
             if not payload:
                 raise HTTPException(status_code=400, detail="Google authentication failed (invalid or expired token)")
