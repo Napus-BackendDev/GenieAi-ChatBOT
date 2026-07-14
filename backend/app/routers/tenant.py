@@ -106,6 +106,7 @@ class TenantProfile(BaseModel):
     webhook_domain: str = ""
     line_channel_access_token: str = ""
     line_channel_secret: str = ""
+    line_verified: bool = False
     facebook_page_access_token: str = ""
     facebook_verify_token: str = ""
     webchat_settings: WebchatSettings = WebchatSettings()
@@ -139,7 +140,7 @@ async def get_profile(tenant_id: str = Depends(require_tenant)):
         raise HTTPException(status_code=500, detail="Failed to load tenant profile.")
 
     # Compute configuration booleans from the (still-present) secret values.
-    line_configured = bool(str(data.get("line_channel_access_token") or "").strip())
+    line_configured = bool(str(data.get("line_channel_access_token") or "").strip() and str(data.get("line_channel_secret") or "").strip())
     facebook_configured = bool(str(data.get("facebook_page_access_token") or "").strip())
 
     # Strip secrets before returning.
@@ -281,6 +282,7 @@ async def verify_line(
                 logger.warning(f"Could not read tenant profile for LINE verify: {read_err}")
 
     if not access_token:
+        await _save_profile_field(tenant_id, "line_verified", False)
         return {"valid": False, "error": "ยังไม่ได้ใส่ Channel Access Token"}
 
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -289,6 +291,7 @@ async def verify_line(
             response = await client.get(LINE_BOT_INFO_URL, headers=headers, timeout=5.0)
         if response.status_code == 200:
             data = response.json()
+            await _save_profile_field(tenant_id, "line_verified", True)
             return {
                 "valid": True,
                 "bot_name": data.get("displayName", ""),
@@ -298,6 +301,7 @@ async def verify_line(
     except Exception as e:
         logger.warning(f"LINE verify error for tenant {tenant_id}: {e}")
 
+    await _save_profile_field(tenant_id, "line_verified", False)
     return {"valid": False, "error": "โทเคนไม่ถูกต้องหรือหมดอายุ"}
 
 
@@ -452,12 +456,12 @@ async def get_settings(tenant_id: str, current_tenant: str = Depends(get_current
     settings_keys = [
         "company_name", "business_hours", "contact_number", "webhook_domain",
         "webchat_settings", "ai_settings", "booking_settings",
-        "line_channel_access_token", "line_channel_secret",
+        "line_channel_access_token", "line_channel_secret", "line_verified",
         "facebook_page_access_token", "facebook_verify_token"
     ]
     res = {k: data.get(k) for k in settings_keys}
     
-    res["line_configured"] = bool(str(res.get("line_channel_access_token") or "").strip())
+    res["line_configured"] = bool(str(res.get("line_channel_access_token") or "").strip() and str(res.get("line_channel_secret") or "").strip())
     res["facebook_configured"] = bool(str(res.get("facebook_page_access_token") or "").strip())
     
     for field in SECRET_FIELDS:
@@ -483,6 +487,8 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
         if field in SECRET_FIELDS and not str(val or "").strip():
             continue
         raw[field] = val
+        if field == "line_channel_access_token":
+            raw["line_verified"] = False
         
     await db_save_profile(tenant_id, raw)
     
@@ -495,3 +501,70 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
         pass
         
     return {"status": "success", "message": "Settings saved successfully."}
+
+
+@router.delete("/profile/{tenant_id}")
+async def delete_tenant_account(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+    """
+    Completely deletes/wipes all data associated with this tenant, including MongoDB/JSON profiles,
+    documents metadata, bookings, static uploaded images, and ChromaDB vector chunks.
+    """
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    
+    import shutil
+    import os
+    from app.core.db import db_delete_tenant_data
+    from app.core.redis import get_redis
+    from app.services.rag import get_chroma_client, CHROMA_COLLECTION_NAME
+    
+    try:
+        # 1. Delete ChromaDB vector embeddings
+        try:
+            client = get_chroma_client()
+            collection = client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
+            collection.delete(where={"tenant_id": tenant_id})
+            logger.info(f"Deleted all ChromaDB chunks for tenant '{tenant_id}'")
+        except Exception as e:
+            logger.error(f"Failed to delete ChromaDB collection for tenant '{tenant_id}': {e}")
+            
+        # 2. Delete static files / uploaded images
+        static_dir = os.path.join("static", "images", tenant_id)
+        if os.path.exists(static_dir):
+            try:
+                shutil.rmtree(static_dir)
+                logger.info(f"Deleted static images directory for tenant {tenant_id}")
+            except Exception as e:
+                logger.error(f"Failed to delete static images directory {static_dir}: {e}")
+                
+        # 3. Delete database records (users, profiles, bookings, documents metadata)
+        await db_delete_tenant_data(tenant_id)
+        
+        # 4. Delete Redis cache keys (cag context, histories)
+        try:
+            redis_client = get_redis()
+            # Clear profile cache
+            await redis_client.delete(f"tenant_cag_profile:{tenant_id}")
+            
+            # Clear chat histories
+            async for key in redis_client.scan_iter(match=f"chat_history:{tenant_id}:*"):
+                await redis_client.delete(key)
+                
+            # Clear unread badges
+            async for key in redis_client.scan_iter(match=f"unread:{tenant_id}:*"):
+                await redis_client.delete(key)
+                
+            # Clear human intervention flags
+            async for key in redis_client.scan_iter(match=f"human_intervention:{tenant_id}:*"):
+                await redis_client.delete(key)
+                
+            logger.info(f"Cleared all Redis cache states for tenant {tenant_id}")
+        except Exception as e:
+            logger.error(f"Failed to clear Redis keys for tenant {tenant_id}: {e}")
+            
+        return {"status": "success", "message": "Account deleted successfully."}
+        
+    except Exception as e:
+        logger.error(f"Failed to delete account {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
+

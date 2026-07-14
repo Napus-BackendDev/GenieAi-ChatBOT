@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Key, MessageCircle, MessageSquare, Cpu, Save, Copy, Check, Settings, ExternalLink, AlertTriangle, CheckCircle2, XCircle, PlugZap } from 'lucide-react';
+import { Key, MessageCircle, MessageSquare, Cpu, Save, Copy, Check, Settings, ExternalLink, AlertTriangle, CheckCircle2, XCircle, PlugZap, Trash2 } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@heroui/react';
 
 const translations = {
@@ -115,13 +115,15 @@ const translations = {
   }
 };
 
-const SettingsPage = ({ tenantId, lang }) => {
+const SettingsPage = ({ tenantId, lang, onLogout }) => {
   const t = translations[lang || 'th'];
   const [activeSubTab, setActiveSubTab] = useState('line');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [copiedUrlType, setCopiedUrlType] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   // Connection status flags (secrets are NEVER returned by GET; only these booleans).
   const [lineConfigured, setLineConfigured] = useState(false);
@@ -213,6 +215,47 @@ const SettingsPage = ({ tenantId, lang }) => {
     fetchSettings();
   }, [tenantId]);
 
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== settings.company_name) {
+      alert(lang === 'th' ? "ชื่อร้านไม่ถูกต้อง กรุณาพิมพ์ให้ตรงกับที่ระบุไว้" : "Incorrect company name. Please type it exactly as shown.");
+      return;
+    }
+    
+    const confirmWipe = window.confirm(lang === 'th' 
+      ? "คุณแน่ใจจริงๆ ใช่หรือไม่ที่จะลบบัญชีและข้อมูลทั้งหมด? การดำเนินการนี้ไม่สามารถกู้คืนได้!" 
+      : "Are you absolutely sure you want to delete your account and all data? This action is IRREVERSIBLE!"
+    );
+    if (!confirmWipe) return;
+    
+    setDeleting(true);
+    setMessage({ type: '', text: '' });
+    
+    try {
+      const res = await fetch(`/api/tenant/profile/${tenantId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('genie_ai_token')}`
+        }
+      });
+      
+      if (res.ok) {
+        alert(lang === 'th' ? "ลบบัญชีและข้อมูลของคุณเสร็จสิ้นระบบจะทำการออกจากระบบ" : "Account successfully deleted. You will be logged out.");
+        if (onLogout) {
+          onLogout();
+        }
+      } else {
+        const errData = await res.json();
+        throw new Error(errData.detail || "Failed to delete account");
+      }
+    } catch (err) {
+      console.error(err);
+      setMessage({ type: 'error', text: err.message || (lang === 'th' ? "ลบบัญชีล้มเหลว" : "Failed to delete account") });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const verifyLine = async (tokenOverride) => {
     // Verify against a freshly-typed token if given, else the saved one.
     setLineTest({ testing: true, result: null });
@@ -296,10 +339,11 @@ const SettingsPage = ({ tenantId, lang }) => {
   }
 
   const subTabs = [
-    { id: 'line', name: t.lineTab, icon: MessageCircle },
+    { id: 'line', name: t.lineTab, icon: MessageCircle, connected: lineConfigured && lineVerified },
     { id: 'facebook', name: t.fbTab, icon: MessageSquare },
     { id: 'webchat', name: t.webchatTab, icon: Key },
-    { id: 'ai', name: t.aiTab, icon: Cpu }
+    { id: 'ai', name: t.aiTab, icon: Cpu },
+    { id: 'delete', name: t.deleteTab, icon: Trash2 }
   ];
 
   return (
@@ -341,8 +385,9 @@ const SettingsPage = ({ tenantId, lang }) => {
 
         {/* Right Side: Form Panels */}
         <div className="flex flex-col gap-6">
-          <form onSubmit={handleSave}>
-            <Card className="glass-panel border-white/5 shadow-sm p-6 rounded-2xl">
+          {activeSubTab !== 'delete' ? (
+            <form onSubmit={handleSave}>
+              <Card className="glass-panel border-white/5 shadow-sm p-6 rounded-2xl">
               <CardContent className="p-0 flex flex-col gap-5">
                 
                 {/* 1. LINE CONFIG */}
@@ -752,7 +797,48 @@ const SettingsPage = ({ tenantId, lang }) => {
 
               </CardContent>
             </Card>
-          </form>
+            </form>
+          ) : (
+            <Card className="glass-panel border-red-500/20 dark:border-red-900/30 bg-red-500/5 shadow-sm p-6 rounded-2xl text-left">
+              <CardContent className="p-0 flex flex-col gap-6">
+                <div>
+                  <h3 className="text-base font-bold text-red-600 dark:text-red-400 mb-1 flex items-center gap-2">
+                    <AlertTriangle size={18} />
+                    <span>{t.deleteWarningTitle}</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed bg-white dark:bg-slate-900/50 p-4 rounded-xl border border-red-500/10">
+                    {t.deleteWarningDesc}
+                  </p>
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    {t.deleteConfirmPrompt} <span className="font-extrabold text-red-600 dark:text-red-400 select-all">"{settings.company_name}"</span>
+                  </label>
+                  <Input
+                    type="text"
+                    placeholder={settings.company_name}
+                    value={deleteConfirmText}
+                    onChange={(e) => setDeleteConfirmText(e.target.value)}
+                    className="w-full text-foreground bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-xl h-11"
+                  />
+                </div>
+                
+                <div className="flex justify-end gap-3 pt-4 border-t border-slate-200/40 dark:border-white/5">
+                  <Button
+                    type="button"
+                    isLoading={deleting}
+                    onClick={handleDeleteAccount}
+                    disabled={deleteConfirmText !== settings.company_name || deleting}
+                    className="bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl h-11 px-6 shadow-md shadow-red-600/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <Trash2 size={14} />
+                    <span>{deleting ? t.deletingText : t.deleteButton}</span>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {message.text && (
             <div className={`p-4 rounded-xl text-sm border flex items-center gap-2 ${

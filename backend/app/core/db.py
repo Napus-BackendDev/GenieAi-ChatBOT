@@ -284,19 +284,86 @@ async def db_delete_document(document_id: str) -> bool:
             res = await db.documents.delete_one({"document_id": document_id})
             return res.deleted_count > 0
         except Exception as e:
-            logger.error(f"Error deleting document from MongoDB: {e}")
+            logger.error(f"Error deleting document {document_id} from MongoDB: {e}")
+            return False
 
     file_path = settings.DOCUMENTS_JSON_PATH
     with _documents_lock:
-        _ensure_dir_for_file(file_path)
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 docs = json.load(f)
-        except Exception:
-            docs = []
-        remaining = [d for d in docs if d.get("document_id") != document_id]
-        if len(remaining) == len(docs):
+            remaining = [d for d in docs if d.get("document_id") != document_id]
+            if len(remaining) == len(docs):
+                return False
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(remaining, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting document from documents.json: {e}")
             return False
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(remaining, f, ensure_ascii=False, indent=2)
-        return True
+
+
+async def db_delete_tenant_data(tenant_id: str) -> None:
+    """
+    Deletes all data associated with tenant_id from MongoDB and JSON fallback stores.
+    """
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            await db.users.delete_many({"tenant_id": tenant_id})
+            await db.tenant_profiles.delete_many({"tenant_id": tenant_id})
+            await db.documents.delete_many({"tenant_id": tenant_id})
+            await db.bookings.delete_many({"tenant_id": tenant_id})
+            logger.info(f"Successfully deleted all MongoDB collections for tenant {tenant_id}")
+        except Exception as e:
+            logger.error(f"Error deleting tenant {tenant_id} from MongoDB: {e}")
+
+    # JSON fallback deletions
+    # 1. Users
+    file_path = _get_users_file_path()
+    with _users_lock:
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    users = json.load(f)
+                users = [u for u in users if u.get("tenant_id") != tenant_id]
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(users, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.error(f"Error deleting tenant {tenant_id} from users.json: {e}")
+
+    # 2. Tenant Profile
+    profile_path = _get_profile_path(tenant_id)
+    with _tenant_lock:
+        if os.path.exists(profile_path):
+            try:
+                os.remove(profile_path)
+                logger.info(f"Deleted profile file: {profile_path}")
+            except Exception as e:
+                logger.error(f"Error removing profile file {profile_path}: {e}")
+
+    # 3. Bookings
+    bookings_path = settings.BOOKINGS_JSON_PATH
+    with _bookings_lock:
+        if os.path.exists(bookings_path):
+            try:
+                with open(bookings_path, "r", encoding="utf-8") as f:
+                    bookings = json.load(f)
+                bookings = [b for b in bookings if b.get("tenant_id") != tenant_id]
+                with open(bookings_path, "w", encoding="utf-8") as f:
+                    json.dump(bookings, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.error(f"Error deleting tenant bookings from bookings.json: {e}")
+
+    # 4. Documents Metadata
+    docs_path = settings.DOCUMENTS_JSON_PATH
+    with _documents_lock:
+        if os.path.exists(docs_path):
+            try:
+                with open(docs_path, "r", encoding="utf-8") as f:
+                    docs = json.load(f)
+                docs = [d for d in docs if d.get("tenant_id") != tenant_id]
+                with open(docs_path, "w", encoding="utf-8") as f:
+                    json.dump(docs, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.error(f"Error deleting tenant documents metadata from documents.json: {e}")

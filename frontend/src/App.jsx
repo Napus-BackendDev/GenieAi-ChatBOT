@@ -565,7 +565,7 @@ function App() {
           )}
 
           {activeTab === 'settings' && (
-            <SettingsPage tenantId={user?.tenant_id} lang={lang} />
+            <SettingsPage tenantId={user?.tenant_id} lang={lang} onLogout={handleLogout} />
           )}
         </main>
         
