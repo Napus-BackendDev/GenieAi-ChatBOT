@@ -903,13 +903,13 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                 <span>{lineConfigured ? t.next : t.connectSkip}</span> <ArrowRight size={16} />
               </Button>
             )}
-            {step >= 3 && step < 8 && !parsing && !parseError && (
+            {step >= 3 && step < 8 && (
               <Button onClick={() => setStep(step + 1)}
                 className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-cyan-500/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
                 <span>{t.next}</span> <ArrowRight size={16} />
               </Button>
             )}
-            {step === 8 && !parsing && !parseError && (
+            {step === 8 && (
               <Button onClick={handleConfirm} isLoading={saving}
                 className="bg-gradient-to-r from-[#38A169] to-emerald-500 hover:from-[#2F855A] hover:to-emerald-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-[#38A169]/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
                 <CheckCircle size={16} /> <span>{t.confirm}</span>
