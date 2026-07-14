@@ -93,42 +93,44 @@ function App() {
     localStorage.setItem('genie_ai_lang', lang);
   }, [lang]);
 
-  // Sync URL hash with active dashboard tab to maintain clean and bookmarkable URLs
+  // Sync URL pathname with active state to maintain clean and bookmarkable URLs
   useEffect(() => {
+    let path = '/';
     if (onboardingState === 'dashboard') {
-      window.history.replaceState(null, '', `#${activeTab}`);
+      path = `/${activeTab}`;
     } else if (onboardingState === 'auth') {
-      const hash = authInitialTab === 'signup' ? '#register' : '#login';
-      window.history.replaceState(null, '', hash);
+      path = authInitialTab === 'signup' ? '/register' : '/login';
     } else if (onboardingState === 'home') {
-      window.history.replaceState(null, '', window.location.hash === '#home' ? '#home' : window.location.pathname);
-    } else if (window.location.hash && !['#login', '#register', '#home'].includes(window.location.hash)) {
-      window.history.replaceState(null, '', window.location.pathname);
+      path = '/';
+    }
+    
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, '', path);
     }
   }, [activeTab, onboardingState, authInitialTab]);
 
-  // Read URL hash on load/hashchange to restore the correct active tab/page
+  // Read URL pathname on load/popstate to restore the correct active tab/page
   useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '');
+    const handlePathChange = () => {
+      const path = window.location.pathname.replace(/^\//, ''); // remove leading slash
       const validTabs = ['overview', 'analytics', 'service', 'info', 'promotions', 'faq', 'staff', 'bookings', 'chat', 'sandbox', 'settings'];
       
-      if (hash === 'login') {
+      if (path === 'login') {
         setOnboardingState('auth');
         setAuthInitialTab('login');
-      } else if (hash === 'register' || hash === 'signup') {
+      } else if (path === 'register' || path === 'signup') {
         setOnboardingState('auth');
         setAuthInitialTab('signup');
-      } else if (hash === 'home' || !hash) {
+      } else if (path === 'home' || !path) {
         setOnboardingState('home');
-      } else if (hash && validTabs.includes(hash)) {
-        setActiveTab(hash);
+      } else if (path && validTabs.includes(path)) {
+        setActiveTab(path);
       }
     };
 
-    handleHashChange();
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    handlePathChange();
+    window.addEventListener('popstate', handlePathChange);
+    return () => window.removeEventListener('popstate', handlePathChange);
   }, []);
 
 

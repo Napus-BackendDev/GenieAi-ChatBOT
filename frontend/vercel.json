@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://genieai-chatbot.onrender.com/api/:path*" },
-    { "source": "/static/:path*", "destination": "https://genieai-chatbot.onrender.com/static/:path*" }
+    { "source": "/static/:path*", "destination": "https://genieai-chatbot.onrender.com/static/:path*" },
+    { "source": "/((?!api|static|assets|favicon.ico).*)", "destination": "/index.html" }
   ]
 }

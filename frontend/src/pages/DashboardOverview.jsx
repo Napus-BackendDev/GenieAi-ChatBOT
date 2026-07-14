@@ -139,7 +139,8 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
       return;
     }
     // Fallback: hint the settings tab via the URL hash (App reads this on load).
-    window.location.hash = 'settings';
+    window.history.pushState(null, '', '/settings');
+    window.dispatchEvent(new Event('popstate'));
   };
 
   const formatDate = (isoStr) => {
