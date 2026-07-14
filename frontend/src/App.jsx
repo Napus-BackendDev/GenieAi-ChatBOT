@@ -158,6 +158,13 @@ function App() {
     }
   }, []);
 
+  // Auto-redirect logged-in users away from auth screen to dashboard or onboarding
+  useEffect(() => {
+    if (user && onboardingState === 'auth') {
+      checkUserOnboardingStatus(user);
+    }
+  }, [user, onboardingState]);
+
   // Safe JSON fetch: tolerates an empty body or a backend that is briefly down,
   // returning `fallback` instead of throwing, so onboarding routing never crashes.
   const fetchJsonSafe = async (url, fallback) => {
@@ -172,6 +179,14 @@ function App() {
   };
 
   const checkUserOnboardingStatus = async (currentUser) => {
+    // If the path is '/' (empty path) or 'home', stay on home and do not redirect
+    const path = window.location.pathname.replace(/^\//, '');
+    if (path === 'home' || !path) {
+      setOnboardingState('home');
+      setLoading(false);
+      return;
+    }
+
     try {
       const docs = await fetchJsonSafe(`/api/documents?tenant_id=${currentUser.tenant_id}`, []);
       const profile = await fetchJsonSafe(`/api/tenant/profile/${currentUser.tenant_id}`, {});
