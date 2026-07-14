@@ -100,7 +100,9 @@ function App() {
     } else if (onboardingState === 'auth') {
       const hash = authInitialTab === 'signup' ? '#register' : '#login';
       window.history.replaceState(null, '', hash);
-    } else if (window.location.hash && !['#login', '#register'].includes(window.location.hash)) {
+    } else if (onboardingState === 'home') {
+      window.history.replaceState(null, '', window.location.hash === '#home' ? '#home' : window.location.pathname);
+    } else if (window.location.hash && !['#login', '#register', '#home'].includes(window.location.hash)) {
       window.history.replaceState(null, '', window.location.pathname);
     }
   }, [activeTab, onboardingState, authInitialTab]);
@@ -117,6 +119,8 @@ function App() {
       } else if (hash === 'register' || hash === 'signup') {
         setOnboardingState('auth');
         setAuthInitialTab('signup');
+      } else if (hash === 'home' || !hash) {
+        setOnboardingState('home');
       } else if (hash && validTabs.includes(hash)) {
         setActiveTab(hash);
       }
