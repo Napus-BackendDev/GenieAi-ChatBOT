@@ -101,6 +101,21 @@ def _find_conflict(
 
     return None
 
+def _select_available_staff(
+    staff: list[dict],
+    bookings: list[dict],
+    target_dt: datetime,
+    tenant_id: str,
+    conflict_window_mins: int,
+) -> dict | None:
+    for member in staff:
+        name = (member.get("name") or "").strip()
+        if name and sched.covers_datetime(member.get("schedule") or "", target_dt) and not _find_conflict(
+            bookings, target_dt, tenant_id, name, conflict_window_mins
+        ):
+            return member
+    return None
+
 async def _load_booking_settings(tenant_id: str) -> dict:
     conflict_window = _DEFAULT_CONFLICT_WINDOW_MINS
     min_lead_time = _DEFAULT_MIN_LEAD_TIME_HOURS
@@ -136,6 +151,7 @@ async def check_booking_availability(booking_datetime: str, tenant_id: str = "de
         lead_display = int(min_lead_time_hours) if float(min_lead_time_hours).is_integer() else min_lead_time_hours
         return {"available": False, "reason": "under_lead_time", "message": f"กรุณาจองล่วงหน้าอย่างน้อย {lead_display} ชั่วโมง"}
 
+    staff_name = staff_name.strip() if staff_name and staff_name.strip() else None
     if staff_name:
         staff = await _find_staff(tenant_id, staff_name)
         staff_schedule = staff.get("schedule", "") if staff else ""
@@ -152,6 +168,17 @@ async def check_booking_availability(booking_datetime: str, tenant_id: str = "de
 
     async with booking_file_lock:
         bookings = await db_load_bookings()
+        if not staff_name:
+            staff = _select_available_staff(
+                await _load_tenant_staff(tenant_id), bookings, target_dt, tenant_id, conflict_window_mins
+            )
+            if not staff:
+                return {
+                    "available": False,
+                    "reason": "no_staff_available",
+                    "message": "ขออภัยค่ะ ไม่มีแพทย์ที่ออกตรวจและว่างในเวลานี้ กรุณาเลือกเวลาอื่นนะคะ",
+                }
+            staff_name = staff["name"]
         conflict = _find_conflict(bookings, target_dt, tenant_id, staff_name, conflict_window_mins)
 
     if conflict is not None:
@@ -167,7 +194,7 @@ async def check_booking_availability(booking_datetime: str, tenant_id: str = "de
             "message": f"ขออภัยค่ะ วันและเวลาดังกล่าวมีผู้อื่นจองแล้ว ({formatted_time}){staff_info} กรุณาเลือกเวลาอื่นที่ห่างกันอย่างน้อย {conflict_window_mins} นาที"
         }
 
-    return {"available": True, "message": "ช่วงเวลานี้ว่างและสามารถจองนัดหมายได้ค่ะ"}
+    return {"available": True, "staff_name": staff_name, "message": "ช่วงเวลานี้ว่างและสามารถจองนัดหมายได้ค่ะ"}
 
 async def create_booking(
     customer_name: str,
@@ -183,9 +210,16 @@ async def create_booking(
     if not _is_valid_phone(phone_number):
         return {"status": "error", "message": "เบอร์โทรศัพท์ไม่ถูกต้องค่ะ รบกวนขอเบอร์โทรศัพท์ที่ติดต่อได้อีกครั้งนะคะ"}
 
+    staff_name = staff_name.strip() if staff_name and staff_name.strip() else None
+    auto_assign = staff_name is None
     avail_status = await check_booking_availability(booking_datetime, tenant_id, staff_name)
     if not avail_status["available"]:
-        return {"status": "error", "message": avail_status["message"]}
+        return {
+            "status": "error",
+            **({"reason": avail_status["reason"]} if avail_status.get("reason") else {}),
+            "message": avail_status["message"],
+        }
+    staff_name = avail_status.get("staff_name") or staff_name
 
     try:
         target_dt = _parse_booking_dt(booking_datetime)
@@ -194,10 +228,23 @@ async def create_booking(
 
     booking_settings = await _load_booking_settings(tenant_id)
     conflict_window_mins = booking_settings["conflict_window_mins"]
+    staff = await _load_tenant_staff(tenant_id) if auto_assign else []
 
     async with booking_file_lock:
         bookings = await db_load_bookings()
         conflict = _find_conflict(bookings, target_dt, tenant_id, staff_name, conflict_window_mins)
+        if conflict is not None and auto_assign:
+            selected = _select_available_staff(
+                staff, bookings, target_dt, tenant_id, conflict_window_mins
+            )
+            if not selected:
+                return {
+                    "status": "error",
+                    "reason": "no_staff_available",
+                    "message": "ขออภัยค่ะ ไม่มีแพทย์ที่ออกตรวจและว่างในเวลานี้ กรุณาเลือกเวลาอื่นนะคะ",
+                }
+            staff_name = selected["name"]
+            conflict = None
         if conflict is not None:
             try:
                 b_dt = _parse_booking_dt(conflict.get("booking_datetime", ""))
@@ -234,6 +281,7 @@ async def create_booking(
     return {
         "status": "success",
         "booking_id": new_booking["booking_id"],
+        "staff_name": staff_name,
         "message": f"ระบบได้ลงทะเบียนการนัดหมายของคุณเรียบร้อยแล้วค่ะ: \n📌 คุณ: {customer_name}\n📌 เรื่อง: {service_topic}{staff_msg}\n📅 วันที่: {formatted_date}\n⏰ เวลา: {formatted_time} น."
     }
 

@@ -72,7 +72,11 @@ BOOKING_TOOLS = [
         "type": "function",
         "function": {
             "name": "check_booking_availability",
-            "description": "Checks if a specific date and time slot is available for booking.",
+            "description": (
+                "Checks if a date and time slot is available. Omit staff_name to auto-select one "
+                "on-duty provider who has no booking conflict. When the customer says any doctor, "
+                "anyone, or ใครก็ได้, omit staff_name and call this once; never test providers one by one."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -82,7 +86,7 @@ BOOKING_TOOLS = [
                     },
                     "staff_name": {
                         "type": "string",
-                        "description": "Name of the staff member / service provider to book with, chosen from the shop's staff list. Highly recommended to specify according to service type."
+                        "description": "Optional provider name. Omit when the customer accepts any doctor/provider so the system auto-selects an on-duty, conflict-free provider."
                     }
                 },
                 "required": ["booking_datetime"]
@@ -93,7 +97,11 @@ BOOKING_TOOLS = [
         "type": "function",
         "function": {
             "name": "create_booking",
-            "description": "Creates a new appointment booking in the system after details are confirmed and slot is available.",
+            "description": (
+                "Creates a confirmed appointment. Omit staff_name to auto-select and persist one "
+                "on-duty provider with no conflict. For any doctor / anyone / ใครก็ได้, omit "
+                "staff_name instead of trying providers one by one."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -119,7 +127,7 @@ BOOKING_TOOLS = [
                     },
                     "staff_name": {
                         "type": "string",
-                        "description": "Name of the staff member / service provider to book with, chosen from the shop's staff list. Highly recommended to specify according to service type."
+                        "description": "Optional provider name. Omit when the customer accepts any doctor/provider; the system will auto-select and persist an on-duty, conflict-free provider."
                     }
                 },
                 "required": ["customer_name", "phone_number", "email", "service_topic", "booking_datetime"]
@@ -154,8 +162,8 @@ async def chat_completion_with_tools(
         temperature = 0.3
 
     try:
-        # Limit sequential tool calling to 5 iterations to avoid infinite loops
-        max_iterations = 5
+        # Runaway guard; legitimate booking flows may require several tool steps.
+        max_iterations = 10
 
         for iteration in range(max_iterations):
             response = await openai_client.chat.completions.create(
@@ -227,7 +235,7 @@ async def chat_completion_with_tools(
         
         # If loop exceeds maximum iterations
         logger.warning(f"Exceeded max tool iterations ({max_iterations}) for tenant {tenant_id}")
-        return "ขออภัยด้วยค่ะ ระบบประมวลผลการจองล่าช้าเกินไป กรุณาลองนัดหมายใหม่อีกครั้งค่ะ"
+        return "ขออภัยด้วยค่ะ ยังไม่สามารถดำเนินการจองให้เสร็จได้ กรุณาระบุชื่อคุณหมอที่ต้องการ หรือแจ้งเวลาอื่นที่สะดวกนะคะ"
 
     except Exception as e:
         import traceback
