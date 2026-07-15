@@ -227,7 +227,7 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
 
 @router.post("/reply")
 async def reply_to_session(req: ReplyRequest, current_tenant: str = Depends(get_current_tenant)):
-    from app.routers.webhooks import push_to_line
+    from app.routers.webhooks import push_to_line, get_tenant_line_credentials
     from app.core.redis import get_redis
     session_id = req.session_id.strip()
     message = req.message.strip()
@@ -273,7 +273,12 @@ async def reply_to_session(req: ReplyRequest, current_tenant: str = Depends(get_
                     line_message = [{"type": "text", "text": message}]
             else:
                 line_message = [{"type": "text", "text": message}]
-            await push_to_line(user_id=session_id, messages=line_message)
+            # Push with THIS tenant's LINE token (the channel the customer actually
+            # talks to). Using the global env token pushes from the wrong bot → LINE
+            # rejects it with 400 "Failed to send messages" because the recipient is
+            # not a friend of that channel.
+            line_token, _ = await get_tenant_line_credentials(tenant_id)
+            await push_to_line(user_id=session_id, messages=line_message, access_token=line_token)
 
         return {"status": "success", "requires_human": requires_human}
     except Exception as e:
