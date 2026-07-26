@@ -30,6 +30,15 @@ The best code is the code you don't write. Before writing anything new, climb th
 
 **Token hygiene:** read targeted line ranges instead of whole large files; prefer Grep/Glob over broad exploration; don't re-read a file you just edited; keep diffs minimal.
 
+## Shared Workspace & Memory (Fastwork Hub)
+
+GenieAI is integrated with the global Fastwork Hub configuration. It shares the following rules and knowledge structures:
+- **Long-Term Memory (Obsidian)**: Long-term memory is stored in the Obsidian vault `C:\Users\asus\Desktop\Antigraity` (shared across every project, compounding over time).
+- **Caveman Mode (Token Reduction)**: Cuts output tokens ~65% while keeping full technical accuracy. Triggered by `/caveman [lite|full|ultra]` or when requested.
+- **Obsidian Integration**: Uses `obsidian-vault` (to read/write notes in `C:\Users\asus\Desktop\Antigraity` or `DBLocel`) and `obsidian-markdown` to structure notes correctly.
+- **LLM-Wiki Pattern**: Incrementally compiles sources into the persistent `Antigraity` vault following Karpathy's LLM Wiki pattern. Schema lives at `Antigraity/WIKI_SCHEMA.md`.
+- **Agent Orchestrator**: Supports multi-CLI delegation (Claude Code as lead, Codex for sandboxed writes, Gemini for read-only research, Antigravity for interactive handoff).
+
 ## Parallel Agents (Claude Code + Antigravity)
 
 Two agents may work this repo at once. To avoid conflicts:

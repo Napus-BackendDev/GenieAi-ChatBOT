@@ -233,6 +233,15 @@ Tenant isolation is achieved through `tenant_id` parameter filtering at every la
   2. **Concurrency Control**: Use threading locks (`doc_file_lock`, `booking_file_lock`) on local JSON storage modifications to prevent race conditions.
   3. **Structured Response Contracts**: Return explicit HTTP status codes along with descriptive error payloads to ease frontend diagnostic checks.
 
+## Shared Workspace & Memory (Fastwork Hub)
+
+GenieAI is integrated with the global Fastwork Hub configuration. It shares the following rules and knowledge structures:
+- **Long-Term Memory (Obsidian)**: Long-term memory is stored in the Obsidian vault `C:\Users\asus\Desktop\Antigraity` (shared across every project, compounding over time).
+- **Caveman Mode (Token Reduction)**: Cuts output tokens ~65% while keeping full technical accuracy. Triggered by `/caveman [lite|full|ultra]` or when requested.
+- **Obsidian Integration**: Uses `obsidian-vault` (to read/write notes in `C:\Users\asus\Desktop\Antigraity` or `DBLocel`) and `obsidian-markdown` to structure notes correctly.
+- **LLM-Wiki Pattern**: Incrementally compiles sources into the persistent `Antigraity` vault following Karpathy's LLM Wiki pattern. Schema lives at `Antigraity/WIKI_SCHEMA.md`.
+- **Agent Orchestrator**: Supports multi-CLI delegation (Claude Code as lead, Codex for sandboxed writes, Gemini for read-only research, Antigravity for interactive handoff).
+
 ## Parallel Agents (Codex / Antigravity + Claude Code)
 
 Two agents may work this repo at once. To avoid conflicts:
