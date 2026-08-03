@@ -16,7 +16,7 @@ from typing import Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, Header, HTTPException
+from fastapi import Cookie, Depends, Header, HTTPException
 
 from app.core.config import settings
 
@@ -65,6 +65,9 @@ def _resolve_secret() -> str:
 
 
 _SECRET = _resolve_secret()
+_WEBCHAT_SECRET = settings.WEBCHAT_JWT_SECRET or _SECRET
+_TOKEN_ISSUER = "genieai"
+_ADMIN_AUDIENCE = "genieai-admin"
 
 
 # ---------------------------------------------------------------------------
@@ -97,34 +100,94 @@ def create_access_token(tenant_id: str, email: str) -> str:
     payload = {
         "sub": tenant_id,
         "email": email,
+        "iss": _TOKEN_ISSUER,
+        "aud": _ADMIN_AUDIENCE,
+        "purpose": "admin",
         "iat": now,
         "exp": now + timedelta(days=settings.JWT_EXPIRE_DAYS),
     }
     return jwt.encode(payload, _SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
-def get_current_tenant(authorization: Optional[str] = Header(None)) -> str:
+_WEBCHAT_AUDIENCE = "genieai-webchat"
+
+
+def create_webchat_token(tenant_id: str, version: int = 1) -> str:
+    """Issue a signed, purpose-scoped token for a public web-chat widget."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": tenant_id,
+        "iss": _TOKEN_ISSUER,
+        "aud": _WEBCHAT_AUDIENCE,
+        "purpose": "webchat",
+        "ver": version,
+        "iat": now,
+        "exp": now + timedelta(days=30),
+    }
+    return jwt.encode(payload, _WEBCHAT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_webchat_token(token: str) -> dict:
+    """Return verified web-chat claims, otherwise raise 401."""
+    try:
+        payload = jwt.decode(
+            token,
+            _WEBCHAT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience=_WEBCHAT_AUDIENCE,
+            issuer=_TOKEN_ISSUER,
+            options={"require": ["sub", "iss", "aud", "purpose", "ver", "iat", "exp"]},
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid web chat token")
+
+    tenant_id = payload.get("sub")
+    if payload.get("purpose") != "webchat" or not isinstance(tenant_id, str) or not tenant_id:
+        raise HTTPException(status_code=401, detail="Invalid web chat token")
+    return payload
+
+
+def verify_webchat_token(token: str) -> str:
+    """Return the tenant from a valid web-chat token, otherwise raise 401."""
+    return decode_webchat_token(token)["sub"]
+
+
+def get_current_tenant(
+    authorization: Optional[str] = Header(None),
+    session_cookie: Optional[str] = Cookie(None, alias=settings.SESSION_COOKIE_NAME),
+) -> str:
     """FastAPI dependency: resolve tenant_id from a verified Bearer token.
 
     Expects `Authorization: Bearer <token>`. Raises 401 on a missing/malformed
     header, wrong scheme, or a token that fails signature/expiry verification.
     Returns the `sub` claim (the tenant_id).
     """
-    if not authorization:
+    token = None
+    if authorization:
+        parts = authorization.split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        token = parts[1].strip()
+    elif isinstance(session_cookie, str) and session_cookie:
+        token = session_cookie
+
+    if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    parts = authorization.split(" ", 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
-        raise HTTPException(status_code=401, detail="Not authenticated")
-
-    token = parts[1].strip()
     try:
-        payload = jwt.decode(token, _SECRET, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token,
+            _SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience=_ADMIN_AUDIENCE,
+            issuer=_TOKEN_ISSUER,
+            options={"require": ["sub", "iss", "aud", "purpose", "iat", "exp"]},
+        )
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     tenant_id = payload.get("sub")
-    if not tenant_id:
+    if payload.get("purpose") != "admin" or not tenant_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return tenant_id
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FileText, Save, Trash2, Upload, Plus, AlertCircle, CheckCircle } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@heroui/react';
 import { TableSkeleton } from '../components/SkeletonLoader';
@@ -17,7 +17,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
   const [message, setMessage] = useState({ type: '', text: '' });
   const [activeSubTab, setActiveSubTab] = useState('profile');
 
-  const fetchProfileAndDocs = async () => {
+  const fetchProfileAndDocs = useCallback(async () => {
     try {
       setLoading(true);
       const profileRes = await fetch(`/api/tenant/profile/${tenantId}`);
@@ -32,11 +32,11 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchProfileAndDocs();
-  }, [tenantId]);
+  }, [fetchProfileAndDocs]);
 
   const handleProfileSave = async (e) => {
     e.preventDefault();

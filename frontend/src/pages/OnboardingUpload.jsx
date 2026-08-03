@@ -106,12 +106,17 @@ const TR = {
     advanced: 'ขั้นสูง: ดูข้อความต้นฉบับ',
     rawText: 'ข้อความต้นฉบับจากไฟล์',
     invalidService: 'กรุณากรอกชื่อบริการให้ครบ',
+    invalidStaff: 'กรุณากรอกชื่อทีมงานให้ครบ',
     saveFailed: 'บันทึกข้อมูลไม่สำเร็จ',
     parseFailed: 'อ่านคู่มือไม่สำเร็จ กรุณาลองอัปโหลดใหม่',
     // step 5 done
     doneTitle: 'เสร็จเรียบร้อย! 🎉',
-    doneSub: 'ผู้ช่วย AI ของคุณพร้อมทำงานแล้ว ลูกค้าสามารถเริ่มแชทและจองนัดได้ทันที',
+    doneSub: (hasChannel, hasStaff) => hasChannel && hasStaff
+      ? 'ผู้ช่วย AI ของคุณพร้อมทำงานแล้ว ลูกค้าสามารถเริ่มแชทและจองนัดได้ทันที'
+      : `บันทึกโปรไฟล์ธุรกิจแล้ว กรุณา${!hasChannel ? 'เชื่อมต่อช่องทางแชท' : ''}${!hasChannel && !hasStaff ? ' และ' : ''}${!hasStaff ? 'เพิ่มทีมงาน' : ''}ในแดชบอร์ดก่อนเปิดรับแชทและการจอง`,
     goDashboard: 'เข้าสู่หน้าแดชบอร์ด',
+    dismiss: 'ปิดข้อความนี้',
+    removeItem: 'ลบรายการ',
     // nav buttons
     next: 'ถัดไป',
     back: 'ย้อนกลับ',
@@ -209,11 +214,16 @@ const TR = {
     advanced: 'Advanced: view original text',
     rawText: 'Original text from your file',
     invalidService: 'Please fill every service name.',
+    invalidStaff: 'Please fill every staff member name.',
     saveFailed: 'Could not save your data.',
     parseFailed: 'Could not read the manual. Please try uploading again.',
     doneTitle: 'All set! 🎉',
-    doneSub: 'Your AI assistant is ready. Customers can start chatting and booking right away.',
+    doneSub: (hasChannel, hasStaff) => hasChannel && hasStaff
+      ? 'Your AI assistant is ready. Customers can start chatting and booking right away.'
+      : `Your business profile is saved. Please ${!hasChannel ? 'connect a chat channel' : ''}${!hasChannel && !hasStaff ? ' and ' : ''}${!hasStaff ? 'add staff' : ''} in the dashboard before enabling chat and bookings.`,
     goDashboard: 'Go to dashboard',
+    dismiss: 'Dismiss this message',
+    removeItem: 'Remove item',
     next: 'Next',
     back: 'Back',
     confirm: 'Confirm',
@@ -221,18 +231,18 @@ const TR = {
   }
 };
 
-const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComplete }) => {
+const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComplete: onComplete }) => {
   const t = TR[lang] || TR.th;
   const [step, setStep] = useState(1); // 1..5
 
   // Step 1 — shop info
   const [companyName, setCompanyName] = useState(user.company_name || '');
-  const [businessType, setBusinessType] = useState(user.business_type || '');
+  const [businessType] = useState(user.business_type || '');
   const [contactNumber, setContactNumber] = useState('');
-  const [ownerPhone, setOwnerPhone] = useState(user.phone || '');
+  const [ownerPhone] = useState(user.phone || '');
 
   // Step 2 — upload
-  const [fileName, setFileName] = useState('');
+  const [, setFileName] = useState('');
   const [jobId, setJobId] = useState('');
   const [jobIds, setJobIds] = useState([]); // all upload jobs (multi-file merged extraction)
 
@@ -246,7 +256,6 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const [customRules, setCustomRules] = useState([]);
   const [parsing, setParsing] = useState(false);
   const [parseError, setParseError] = useState('');
-  const [showMore, setShowMore] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
   const [showAutoFillBanner, setShowAutoFillBanner] = useState(false);
@@ -254,6 +263,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
 
   const [lineConfigured, setLineConfigured] = useState(false);
   const [facebookConfigured, setFacebookConfigured] = useState(false);
+  const [completedProfile, setCompletedProfile] = useState(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const pollRef = useRef(null);
@@ -282,28 +292,30 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
-  // ---- Step 1: save shop info ----
-  const handleInfoNext = async () => {
+  // ---- Step 3: validate + save business info ----
+  const handleBusinessInfoNext = async () => {
     setError('');
     if (!companyName.trim()) {
       setError(t.infoNeedName);
       return;
     }
-    // Persist questionnaire (info step is self-contained, not dependent on AuthPage).
-    // Fire-and-forget so navigation is instant and never blocked by a slow/down
-    // backend; the same fields are re-saved in the final profile POST at step 4.
-    fetch('/api/auth/questionnaire', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenant_id: tenantId,
-        email: user.email || '',
-        phone: (ownerPhone || user.phone || '').trim(),
-        company_name: companyName.trim(),
-        business_type: businessType.trim()
-      })
-    }).catch(() => {});
-    setStep(2);
+    try {
+      const response = await fetch('/api/auth/questionnaire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          email: user.email || '',
+          phone: (ownerPhone || user.phone || '').trim(),
+          company_name: companyName.trim(),
+          business_type: businessType.trim()
+        })
+      });
+      if (!response.ok) throw new Error();
+      setStep(4);
+    } catch {
+      setError(t.netErr);
+    }
   };
 
   // ---- Step 2: file validation + async upload ----
@@ -523,6 +535,10 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
       setError(t.invalidService);
       return;
     }
+    if (staff.some(member => !member.name?.trim())) {
+      setError(t.invalidStaff);
+      return;
+    }
     setSaving(true);
     try {
       let existing = {};
@@ -531,27 +547,29 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         if (pr.ok) existing = await pr.json();
       } catch { /* proceed with what we have */ }
 
+      const profile = {
+        company_name: companyName.trim(),
+        business_hours: businessHours.trim(),
+        contact_number: contactNumber.trim(),
+        services,
+        promotions: promotions.length ? promotions : (existing.promotions || []),
+        staff: staff.length ? staff : (existing.staff || []),
+        faq: faq.length ? faq : (existing.faq || []),
+        custom_rules: customRules.length ? customRules : (existing.custom_rules || []),
+        // Confirming the profile is the definitive "onboarding done" action —
+        // this flag is what routing uses on future logins (App.jsx).
+        onboarding_completed: true
+      };
       const res = await fetch(`/api/tenant/profile/${tenantId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          company_name: companyName,
-          business_hours: businessHours,
-          contact_number: contactNumber,
-          services,
-          promotions: promotions.length ? promotions : (existing.promotions || []),
-          staff: staff.length ? staff : (existing.staff || []),
-          faq: faq.length ? faq : (existing.faq || []),
-          custom_rules: customRules.length ? customRules : (existing.custom_rules || []),
-          // Confirming the profile is the definitive "onboarding done" action —
-          // this flag is what routing uses on future logins (App.jsx).
-          onboarding_completed: true
-        })
+        body: JSON.stringify(profile)
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.detail || t.saveFailed);
       }
+      setCompletedProfile(profile);
       setStep(9);
     } catch (err) {
       setError(err.message === t.saveFailed ? t.saveFailed : t.netErr);
@@ -676,7 +694,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
               <Button onClick={applyAutoFill} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] h-8 px-3.5 cursor-pointer">
                 กรอกข้อมูลอัตโนมัติ
               </Button>
-              <button onClick={() => setShowAutoFillBanner(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold px-1.5 py-1 cursor-pointer">
+              <button onClick={() => setShowAutoFillBanner(false)} aria-label={t.dismiss} title={t.dismiss} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold px-1.5 py-1 cursor-pointer">
                 ❌
               </button>
             </div>
@@ -833,7 +851,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                             <div key={i} className="flex items-center gap-2 w-full">
                               <input placeholder={t.svcNamePh} value={s.name} onChange={(e) => changeService(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
                               <input type="text" placeholder={t.svcPricePh} value={s.price} onChange={(e) => changeService(i, 'price', e.target.value)} className={`w-28 ${rowInput}`} />
-                              <button type="button" onClick={() => removeService(i)} className={delBtn}><Trash2 size={13} /></button>
+                              <button type="button" onClick={() => removeService(i)} aria-label={t.removeItem} title={t.removeItem} className={delBtn}><Trash2 size={13} /></button>
                             </div>
                           ))}
                         </div>
@@ -861,7 +879,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                             <input placeholder={t.staffNamePh} value={m.name} onChange={(e) => changeStaff(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
                             <input placeholder={t.staffRolePh} value={m.role} onChange={(e) => changeStaff(i, 'role', e.target.value)} className={`w-28 ${rowInput}`} />
                             <input placeholder={t.staffSpecPh} value={m.specialties ? m.specialties.join(', ') : ''} onChange={(e) => changeStaff(i, 'specialties', e.target.value)} className={`w-40 ${rowInput}`} />
-                            <button type="button" onClick={() => removeStaff(i)} className={delBtn}><Trash2 size={13} /></button>
+                            <button type="button" onClick={() => removeStaff(i)} aria-label={t.removeItem} title={t.removeItem} className={delBtn}><Trash2 size={13} /></button>
                           </div>
                         ))}
                       </div>
@@ -888,7 +906,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                             <div className="flex items-center gap-2">
                               <input placeholder={t.promoNamePh} value={p.name} onChange={(e) => changePromo(i, 'name', e.target.value)} className={`flex-1 ${rowInput}`} />
                               <input placeholder={t.promoDiscPh} value={p.discount} onChange={(e) => changePromo(i, 'discount', e.target.value)} className={`w-24 ${rowInput}`} />
-                              <button type="button" onClick={() => removePromo(i)} className={delBtn}><Trash2 size={13} /></button>
+                              <button type="button" onClick={() => removePromo(i)} aria-label={t.removeItem} title={t.removeItem} className={delBtn}><Trash2 size={13} /></button>
                             </div>
                             <input placeholder={t.promoDescPh} value={p.description} onChange={(e) => changePromo(i, 'description', e.target.value)} className={`w-full ${rowInput}`} />
                           </div>
@@ -917,7 +935,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                             <input placeholder={t.faqQPh} value={it.question} onChange={(e) => changeFaq(i, 'question', e.target.value)} className={`w-full ${rowInput}`} />
                             <div className="flex items-center gap-2">
                               <input placeholder={t.faqAPh} value={it.answer} onChange={(e) => changeFaq(i, 'answer', e.target.value)} className={`flex-1 ${rowInput}`} />
-                              <button type="button" onClick={() => removeFaq(i)} className={delBtn}><Trash2 size={13} /></button>
+                              <button type="button" onClick={() => removeFaq(i)} aria-label={t.removeItem} title={t.removeItem} className={delBtn}><Trash2 size={13} /></button>
                             </div>
                           </div>
                         ))}
@@ -946,7 +964,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                               <input placeholder={t.ruleCatPh} value={it.category} onChange={(e) => changeRule(i, 'category', e.target.value)} className={`w-full ${rowInput}`} />
                               <div className="flex items-center gap-2">
                                 <input placeholder={t.ruleTextPh} value={it.rule} onChange={(e) => changeRule(i, 'rule', e.target.value)} className={`flex-1 ${rowInput}`} />
-                                <button type="button" onClick={() => removeRule(i)} className={delBtn}><Trash2 size={13} /></button>
+                                <button type="button" onClick={() => removeRule(i)} aria-label={t.removeItem} title={t.removeItem} className={delBtn}><Trash2 size={13} /></button>
                               </div>
                             </div>
                           ))}
@@ -985,9 +1003,9 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
               </div>
               <div>
                 <h1 className="text-2xl font-extrabold text-[#1A365D] dark:text-white">{t.doneTitle}</h1>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-[420px] leading-relaxed">{t.doneSub}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 max-w-[420px] leading-relaxed">{t.doneSub(lineConfigured || facebookConfigured, completedProfile?.staff?.some(member => member.name?.trim()))}</p>
               </div>
-              <Button onClick={() => onOnboardingComplete && onOnboardingComplete()}
+              <Button onClick={() => onComplete?.(completedProfile)}
                 className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-semibold rounded-xl h-12 px-8 shadow-md shadow-cyan-500/20 hover:scale-[1.02] transition-all cursor-pointer flex items-center gap-2">
                 <span>{t.goDashboard}</span> <ArrowRight size={18} />
               </Button>
@@ -1013,7 +1031,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
               </Button>
             )}
             {step >= 3 && step < 8 && (
-              <Button onClick={() => setStep(step + 1)}
+              <Button onClick={step === 3 ? handleBusinessInfoNext : () => setStep(step + 1)}
                 className="bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 text-white font-semibold rounded-xl h-11 px-6 shadow-md shadow-cyan-500/20 hover:scale-[1.01] transition-all cursor-pointer flex items-center gap-2">
                 <span>{t.next}</span> <ArrowRight size={16} />
               </Button>

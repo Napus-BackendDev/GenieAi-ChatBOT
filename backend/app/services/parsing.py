@@ -55,14 +55,22 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
     os.makedirs(images_dir, exist_ok=True)
     
     total_pages = len(doc)
-    # Only the OpenAI Vision call is throttled; CPU work (pixmap render, image
-    # extraction) runs freely inside each page coroutine.
-    ocr_semaphore = asyncio.Semaphore(_OCR_CONCURRENCY)
+    if total_pages > settings.MAX_PDF_PAGES:
+        doc.close()
+        raise ValueError(f"PDF exceeds the {settings.MAX_PDF_PAGES}-page limit")
+    page_semaphore = asyncio.Semaphore(_OCR_CONCURRENCY)
 
     async def _process_page(page_idx: int) -> dict:
+        async with page_semaphore:
+            return await _process_page_bounded(page_idx)
+
+    async def _process_page_bounded(page_idx: int) -> dict:
         page_number = page_idx + 1
         page = doc[page_idx]
-
+        scale = 150 / 72
+        rendered_area = int(page.rect.width * scale) * int(page.rect.height * scale)
+        if rendered_area > settings.MAX_PDF_PAGE_AREA:
+            raise ValueError(f"PDF page {page_number} is too large to render safely")
         logger.info(f"Processing PDF page {page_number}/{total_pages}")
 
         # 1. Visual OCR using GPT-4o-mini Vision
@@ -75,35 +83,34 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
             # Encode to base64
             base64_image = base64.b64encode(img_bytes).decode("utf-8")
 
-            # Call OpenAI Vision API (rate-limited by the shared semaphore)
+            # Call OpenAI Vision API while the whole page pipeline is bounded.
             logger.info(f"Calling GPT-4o-mini Vision OCR for page {page_number}")
-            async with ocr_semaphore:
-                response = await openai_client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": (
-                                        "Extract all text, structures, and tables from this document page image.\n"
-                                        "Return the exact text and tables formatted as markdown. Do not add any conversational text "
-                                        "or wrap the response in markdown code block markers. Respond in the native language "
-                                        "of the document (typically Thai or English)."
-                                    )
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:image/png;base64,{base64_image}"
-                                    }
+            response = await openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Extract all text, structures, and tables from this document page image.\n"
+                                    "Return the exact text and tables formatted as markdown. Do not add any conversational text "
+                                    "or wrap the response in markdown code block markers. Respond in the native language "
+                                    "of the document (typically Thai or English)."
+                                )
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}"
                                 }
-                            ]
-                        }
-                    ],
-                    temperature=0.0
-                )
+                            }
+                        ]
+                    }
+                ],
+                temperature=0.0
+            )
             text = response.choices[0].message.content.strip()
 
             # Clean up markdown code blocks if the model wrapped it anyway
@@ -156,9 +163,10 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
         }
 
     # gather preserves input order, so parsed_pages stays deterministic (page 1..N).
-    parsed_pages = await asyncio.gather(*(_process_page(i) for i in range(total_pages)))
-
-    doc.close()
+    try:
+        parsed_pages = await asyncio.gather(*(_process_page(i) for i in range(total_pages)))
+    finally:
+        doc.close()
     logger.info(f"Completed parsing of PDF {file_path}. Extracted {len(parsed_pages)} pages.")
     
     return {

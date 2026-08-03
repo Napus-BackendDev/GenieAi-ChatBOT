@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { Users, Plus, Trash2, Edit2, Search, Award, Languages, Calendar, GraduationCap, Heart, Clock, AlertCircle, CheckCircle, Filter, ChevronDown } from 'lucide-react';
 import { Card, CardContent, Button } from '@heroui/react';
 import { GridSkeleton } from '../components/SkeletonLoader';
@@ -12,22 +12,22 @@ const translations = {
     confirmDelete: "คุณต้องการลบข้อมูลบุคลากรท่านนี้จริงหรือไม่? การเปลี่ยนแปลงจะส่งผลต่อ AI ในการตอบคำถามทันที.",
     
     title: "จัดการทีมบุคลากร (Staff Directory)",
-    subtitle: "ระบุตารางการเข้างาน วุฒิการศึกษา และความชำนาญของทันตแพทย์ เพื่อส่งป้อนเป็นความรู้ระบบ AI ให้ตอบกลับอย่างถูกต้อง",
+    subtitle: "ระบุตารางการทำงาน ประสบการณ์ และความเชี่ยวชาญของทีม เพื่อให้ AI ตอบลูกค้าได้อย่างถูกต้อง",
     addBtn: "เพิ่มบุคลากรใหม่",
     searchPlaceholder: "ค้นหาชื่อ, ตำแหน่ง หรือความเชี่ยวชาญ...",
     noResults: "ไม่พบบุคลากรตามที่ค้นหา หรือยังไม่มีรายชื่อลงทะเบียนในระบบ",
-    defaultRole: "ทันตแพทย์ประจำคลินิก",
+    defaultRole: "สมาชิกทีม",
     editTooltip: "แก้ไขข้อมูล",
     deleteTooltip: "ลบข้อมูล",
     
     labelQualifications: "วุฒิบัตร / การศึกษา",
     labelSchedule: "ตารางเข้าเวรทำงาน",
-    labelBoardCert: "บอร์ดการแพทย์",
+    labelBoardCert: "ใบอนุญาต / ประกาศนียบัตรวิชาชีพ",
     labelLanguages: "ภาษาที่รองรับ",
     labelSpecialInterests: "ความสนใจ / บริการชำนาญพิเศษ",
     labelExperience: "ประสบการณ์ทำงาน / วุฒิการศึกษา",
     
-    modalAddTitle: "เพิ่มบุคลากรการรักษาท่านใหม่",
+    modalAddTitle: "เพิ่มสมาชิกทีม",
     modalEditTitle: "แก้ไขข้อมูลของ {name}",
     
     formName: "ชื่อ-นามสกุล *",
@@ -35,20 +35,20 @@ const translations = {
     formSpecialties: "ความเชี่ยวชาญเฉพาะทาง (คั่นด้วยเครื่องหมายจุลภาค ,)",
     formExperience: "ประสบการณ์ทำงาน",
     formQualifications: "วุฒิการศึกษา / วุฒิบัตร",
-    formBoardCert: "ประกาศนียบัตรวิชาชีพ / บอร์ดการแพทย์",
+    formBoardCert: "ใบอนุญาต / ประกาศนียบัตรวิชาชีพ",
     formLanguages: "ภาษาที่ใช้สื่อสารได้ (คั่นด้วยเครื่องหมายจุลภาค ,)",
     formSchedule: "ตารางการทำงาน / เข้าเวร",
     formSpecialInterests: "ความสนใจพิเศษ (คั่นด้วยเครื่องหมายจุลภาค ,)",
     
-    placeholderName: "เช่น ทพญ. ณัฐธิดา แสนแก้ว",
-    placeholderRole: "เช่น ทันตแพทย์รักษารากฟัน (Endodontist)",
-    placeholderSpecialties: "เช่น รักษารากฟัน, ทันตกรรมทั่วไป",
+    placeholderName: "เช่น ณัฐธิดา แสนแก้ว",
+    placeholderRole: "เช่น ช่างทำผม, ที่ปรึกษา, ผู้จัดการ",
+    placeholderSpecialties: "เช่น ทำสีผม, ดูแลลูกค้า, ให้คำปรึกษา",
     placeholderExperience: "เช่น 5 ปี หรือ 12 ปี",
-    placeholderQualifications: "เช่น DDS Chulalongkorn 2018 | Certificate of Endodontics Mahidol 2021",
-    placeholderBoardCert: "เช่น Diplomate of the Thai Board of Endodontics",
+    placeholderQualifications: "เช่น ปริญญาตรีบริหารธุรกิจ | ประกาศนียบัตรวิชาชีพ 2024",
+    placeholderBoardCert: "เช่น ใบอนุญาตประกอบวิชาชีพ หรือประกาศนียบัตรที่เกี่ยวข้อง",
     placeholderLanguages: "เช่น ไทย, อังกฤษ, ญี่ปุ่น",
     placeholderSchedule: "เช่น ทุกวันอังคาร 09:00 - 18:00 น. หรือ อาทิตย์ (สัปดาห์ที่ 1, 3) 10:00 - 16:00 น.",
-    placeholderSpecialInterests: "เช่น การรักษารากฟันด้วยกล้องจุลทรรศน์, การอุดฟันสีเนื้อคอมโพสิต",
+    placeholderSpecialInterests: "เช่น งานบริการลูกค้า, เทคนิคเฉพาะทาง",
     
     cancelBtn: "ยกเลิก",
     addSubmitBtn: "เพิ่มข้อมูลบุคลากร",
@@ -66,13 +66,13 @@ const translations = {
     addBtn: "Add New Staff",
     searchPlaceholder: "Search by name, role, or specialty...",
     noResults: "No staff members found matching your search or none registered yet.",
-    defaultRole: "Clinic Dentist",
+    defaultRole: "Team member",
     editTooltip: "Edit info",
     deleteTooltip: "Delete info",
     
     labelQualifications: "Qualifications / Education",
     labelSchedule: "Schedule",
-    labelBoardCert: "Medical Board",
+    labelBoardCert: "Professional License / Certificate",
     labelLanguages: "Languages",
     labelSpecialInterests: "Special Interests & Skills",
     labelExperience: "Experience / Background",
@@ -85,20 +85,20 @@ const translations = {
     formSpecialties: "Specialties (comma-separated ,)",
     formExperience: "Work Experience",
     formQualifications: "Qualifications / Certifications",
-    formBoardCert: "Medical Board / License",
+    formBoardCert: "Professional License / Certificate",
     formLanguages: "Communicated Languages (comma-separated ,)",
     formSchedule: "Work Schedule",
     formSpecialInterests: "Special Interests (comma-separated ,)",
     
-    placeholderName: "e.g. Dr. Jane Smith",
-    placeholderRole: "e.g. Endodontist",
-    placeholderSpecialties: "e.g. Root canal therapy, General dentistry",
+    placeholderName: "e.g. Jane Smith",
+    placeholderRole: "e.g. Stylist, Consultant, Manager",
+    placeholderSpecialties: "e.g. Hair coloring, Customer care, Consulting",
     placeholderExperience: "e.g. 5 years or 12 years",
-    placeholderQualifications: "e.g. DDS Chulalongkorn 2018 | Certificate of Endodontics Mahidol 2021",
-    placeholderBoardCert: "e.g. Diplomate of the Thai Board of Endodontics",
+    placeholderQualifications: "e.g. Business degree | Professional certificate 2024",
+    placeholderBoardCert: "e.g. Relevant professional license or certificate",
     placeholderLanguages: "e.g. English, Thai, Japanese",
     placeholderSchedule: "e.g. Every Tuesday 09:00 AM - 06:00 PM",
-    placeholderSpecialInterests: "e.g. Root canal treatment under microscope, Composite bonding",
+    placeholderSpecialInterests: "e.g. Customer service, Specialist techniques",
     
     cancelBtn: "Cancel",
     addSubmitBtn: "Add Staff Info",
@@ -187,7 +187,6 @@ const CustomSelect = ({ value, onChange, options, placeholder, icon: Icon }) => 
 
 const StaffManager = ({ tenantId, lang, globalSearch }) => {
   const t = translations[lang || 'th'];
-  const [profile, setProfile] = useState(null);
   const [staffList, setStaffList] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSpecialty, setSelectedSpecialty] = useState('');
@@ -236,7 +235,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
     board_cert: ''
   });
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`/api/tenant/profile/${tenantId}/staff`);
@@ -248,11 +247,11 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t.loadError, tenantId]);
 
   useEffect(() => {
     fetchProfile();
-  }, [tenantId]);
+  }, [fetchProfile]);
 
   const saveProfileData = async (updatedList) => {
     setSaving(true);
@@ -284,7 +283,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
     setModalMode('add');
     setFormData({
       name: '',
-      role: lang === 'th' ? 'ทันตแพทย์ (Dentist)' : 'Dentist',
+      role: '',
       specialties: '',
       experience: '',
       qualifications: '',
@@ -337,7 +336,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
       board_cert: formData.board_cert.trim()
     };
 
-    let updatedList = [];
+    let updatedList;
     if (modalMode === 'add') {
       updatedList = [...staffList, formattedStaff];
     } else {
@@ -402,10 +401,10 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
       let hasDayRange = false;
       const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
       
-      const rangeMatch = partLower.match(/(จันทร์|อังคาร|พุธ|พฤหัสบดี|ศุกร์|เสาร์|อาทิตย์|จ\.|อ\.|พ\.|พฤ\.|ศ\.|ส\.|อา\.|mon|tue|wed|thu|fri|sat|sun)\s*([–\-\—toถึง])\s*(จันทร์|อังคาร|พุธ|พฤหัสบดี|ศุกร์|เสาร์|อาทิตย์|จ\.|อ\.|พ\.|พฤ\.|ศ\.|ส\.|อา\.|mon|tue|wed|thu|fri|sat|sun)/);
+      const rangeMatch = partLower.match(/(จันทร์|อังคาร|พุธ|พฤหัสบดี|ศุกร์|เสาร์|อาทิตย์|จ\.|อ\.|พ\.|พฤ\.|ศ\.|ส\.|อา\.|mon|tue|wed|thu|fri|sat|sun)\s*(?:–|-|—|to|ถึง)\s*(จันทร์|อังคาร|พุธ|พฤหัสบดี|ศุกร์|เสาร์|อาทิตย์|จ\.|อ\.|พ\.|พฤ\.|ศ\.|ส\.|อา\.|mon|tue|wed|thu|fri|sat|sun)/);
       if (rangeMatch) {
         const startDayStr = rangeMatch[1];
-        const endDayStr = rangeMatch[3];
+        const endDayStr = rangeMatch[2];
         
         const getDayIdx = (str) => {
           const s = str.trim();
@@ -446,7 +445,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
     if (filterStart === null && filterEnd === null) return true; // Day matches, no time limit
 
     // Parse time range from matched part (e.g. "09:00–12:00" or "09.00 - 15.00")
-    const timeMatch = matchedPart.match(/(\d{1,2})[:.](\d{2})\s*[–\-\—toถึง]\s*(\d{1,2})[:.](\d{2})/);
+    const timeMatch = matchedPart.match(/(\d{1,2})[:.](\d{2})\s*(?:–|-|—|to|ถึง)\s*(\d{1,2})[:.](\d{2})/);
     if (!timeMatch) return true; // Day matches but time cannot be parsed
 
     const scheduleStartHr = parseInt(timeMatch[1], 10) + parseInt(timeMatch[2], 10) / 60;
@@ -661,6 +660,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                   <div className="flex gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity">
                     <button
                       onClick={() => handleOpenEdit(idx, staff)}
+                      aria-label={t.editTooltip}
                       className="w-7 h-7 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300 flex items-center justify-center transition-colors cursor-pointer"
                       title={t.editTooltip}
                     >
@@ -668,6 +668,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                     </button>
                     <button
                       onClick={() => handleDelete(idx)}
+                      aria-label={t.deleteTooltip}
                       className="w-7 h-7 rounded-lg bg-[#E53E3E]/10 hover:bg-[#E53E3E]/20 text-[#E53E3E] flex items-center justify-center border border-[#E53E3E]/20 transition-colors cursor-pointer"
                       title={t.deleteTooltip}
                     >

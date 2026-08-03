@@ -1,10 +1,11 @@
 import os
 import uuid
 import logging
+import hashlib
 import httpx
 import asyncio
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 
 from app.core.security import (
     hash_password,
@@ -13,6 +14,7 @@ from app.core.security import (
     get_current_tenant,
 )
 from app.core.db import db_load_users, db_save_users
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -26,6 +28,7 @@ class LoginRequest(BaseModel):
     phone: str = ""
     password: str = ""
     token: str = ""
+    keep_logged_in: bool = True
 
 class QuestionnaireRequest(BaseModel):
     tenant_id: str = ""  # ignored — server derives tenant_id from the auth token
@@ -75,6 +78,62 @@ def _user_response(user: dict, is_new: bool) -> dict:
         "token_type": "bearer",
     }
 
+
+def _finalize_login(response: Response, data: dict, keep_logged_in: bool) -> dict:
+    """Store the admin token in an HttpOnly cookie; optionally hide it from JS."""
+    token = data["access_token"]
+    response.set_cookie(
+        key=settings.SESSION_COOKIE_NAME,
+        value=token,
+        max_age=settings.JWT_EXPIRE_DAYS * 86400 if keep_logged_in else None,
+        httponly=True,
+        secure=settings.is_production,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+        path="/",
+    )
+    if not settings.EXPOSE_ACCESS_TOKEN:
+        data.pop("access_token", None)
+        data.pop("token_type", None)
+    return data
+
+
+async def _enforce_login_rate_limit(
+    request: Request,
+    account: str | None,
+    *,
+    include_ip: bool = True,
+) -> None:
+    from app.core.client_ip import get_client_ip
+    from app.core.redis import get_redis
+    from app.core.rate_limit import increment_with_expiry
+
+    client_ip = get_client_ip(request)
+    limits = []
+    if include_ip:
+        limits.append((f"auth:rate:ip:{client_ip}", 30))
+    if account:
+        account_hash = hashlib.sha256(account.lower().encode("utf-8")).hexdigest()
+        limits.append((f"auth:rate:account:{account_hash}", 10))
+    try:
+        redis_client = get_redis()
+        for key, limit in limits:
+            count = await increment_with_expiry(redis_client, key, 300)
+            if count > limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many login attempts. Please try again later.",
+                    headers={"Retry-After": "300"},
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Login rate limiter unavailable: %s", exc)
+        if settings.is_production:
+            raise HTTPException(
+                status_code=503,
+                detail="Authentication is temporarily unavailable.",
+            )
+
 async def verify_google_token(token: str) -> dict | None:
     """
     Verifies a Google ID token (JWT) using Google's tokeninfo API.
@@ -104,11 +163,15 @@ async def verify_google_token(token: str) -> dict | None:
     return None
 
 @router.post("/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, response: Response, request: Request):
     """
     Handles logging in via mock Google, real Google OAuth, or standard credentials (email + phone).
     """
     provider = req.provider.strip().lower()
+    await _enforce_login_rate_limit(
+        request,
+        req.email if provider == "credentials" else None,
+    )
     
     if provider == "google":
         from app.core.config import settings
@@ -135,7 +198,9 @@ async def login(req: LoginRequest):
             name = payload.get("name", "Google User")
             picture = payload.get("picture", "/avatar.png")
             phone = "" # Google OAuth does not provide phone number by default
-            
+
+        await _enforce_login_rate_limit(request, email, include_ip=False)
+
         users = await _load_users_async()
         existing_user = next((u for u in users if u.get("email") == email), None)
         
@@ -144,7 +209,7 @@ async def login(req: LoginRequest):
             existing_user["name"] = name
             existing_user["picture"] = picture
             await _save_users_async(users)
-            return {
+            return _finalize_login(response, {
                 "tenant_id": existing_user["tenant_id"],
                 "email": existing_user["email"],
                 "phone": existing_user.get("phone", ""),
@@ -155,7 +220,7 @@ async def login(req: LoginRequest):
                 "is_new": not bool(existing_user.get("company_name")),
                 "access_token": create_access_token(existing_user["tenant_id"], existing_user["email"]),
                 "token_type": "bearer",
-            }
+            }, req.keep_logged_in)
         else:
             # Create a new Google user
             new_tenant_id = f"tenant-google-{str(uuid.uuid4())[:8]}"
@@ -171,7 +236,7 @@ async def login(req: LoginRequest):
             users.append(new_user)
             await _save_users_async(users)
             logger.info(f"Created new Google user: {email}")
-            return {
+            return _finalize_login(response, {
                 "tenant_id": new_tenant_id,
                 "email": email,
                 "phone": phone,
@@ -182,7 +247,7 @@ async def login(req: LoginRequest):
                 "is_new": True,
                 "access_token": create_access_token(new_tenant_id, email),
                 "token_type": "bearer",
-            }
+            }, req.keep_logged_in)
                 
     elif provider == "credentials":
         email = req.email.strip().lower()
@@ -209,7 +274,11 @@ async def login(req: LoginRequest):
                 logger.info(f"Failed password login for: {email}")
                 raise HTTPException(status_code=401, detail="อีเมลหรือรหัสผ่านไม่ถูกต้อง")
             logger.info(f"User logged in with password: {email}")
-            return _user_response(existing_user, is_new=not bool(existing_user.get("company_name")))
+            return _finalize_login(
+                response,
+                _user_response(existing_user, is_new=not bool(existing_user.get("company_name"))),
+                req.keep_logged_in,
+            )
 
         # New signup
         new_tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
@@ -224,9 +293,24 @@ async def login(req: LoginRequest):
         users.append(new_user)
         await _save_users_async(users)
         logger.info(f"Created new user account (password) for: {email}")
-        return _user_response(new_user, is_new=True)
+        return _finalize_login(
+            response,
+            _user_response(new_user, is_new=True),
+            req.keep_logged_in,
+        )
     else:
         raise HTTPException(status_code=400, detail="Invalid provider")
+
+
+@router.post("/logout", status_code=204)
+async def logout(response: Response):
+    response.delete_cookie(
+        key=settings.SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.is_production,
+        httponly=True,
+        samesite=settings.SESSION_COOKIE_SAMESITE,
+    )
 
 def _sanitized_user(user: dict) -> dict:
     """Copy of a user record without the secret password_hash for API responses."""

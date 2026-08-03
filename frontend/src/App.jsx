@@ -1,17 +1,39 @@
-import { useState, useEffect, useRef } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Sun, Moon, Bell, Search } from 'lucide-react';
-import AuthPage from './pages/AuthPage';
-import OnboardingUpload from './pages/OnboardingUpload';
 import Sidebar from './components/Sidebar';
-import DashboardOverview from './pages/DashboardOverview';
-import AnalyticsPage from './pages/AnalyticsPage';
-import ServicePage from './pages/ServicePage';
-import StaffManager from './pages/StaffManager';
-import BookingsManager from './pages/BookingsManager';
-import ChatSandbox from './pages/ChatSandbox';
-import LineChatManager from './pages/LineChatManager';
-import Homepage from './pages/Homepage';
-import SettingsPage from './pages/SettingsPage';
+import { InputGroup } from '@heroui/react';
+
+const AuthPage = lazy(() => import('./pages/AuthPage'));
+const OnboardingUpload = lazy(() => import('./pages/OnboardingUpload'));
+const DashboardOverview = lazy(() => import('./pages/DashboardOverview'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const ServicePage = lazy(() => import('./pages/ServicePage'));
+const StaffManager = lazy(() => import('./pages/StaffManager'));
+const BookingsManager = lazy(() => import('./pages/BookingsManager'));
+const ChatSandbox = lazy(() => import('./pages/ChatSandbox'));
+const LineChatManager = lazy(() => import('./pages/LineChatManager'));
+const Homepage = lazy(() => import('./pages/Homepage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const SupportPage = lazy(() => import('./pages/SupportPage'));
+
+const PageFallback = () => (
+  <div className="flex min-h-[40vh] items-center justify-center text-sm font-semibold text-slate-500">
+    Loading...
+  </div>
+);
+
+const readAuthValue = (key) => localStorage.getItem(key) || sessionStorage.getItem(key);
+const authStorage = () => (
+  localStorage.getItem('genie_ai_user')
+    ? localStorage
+    : sessionStorage
+);
+const clearAuth = () => {
+  ['genie_ai_user', 'genie_ai_token'].forEach((key) => {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  });
+};
 
 function App() {
   const [user, setUser] = useState(null);
@@ -98,6 +120,7 @@ function App() {
 
   // Sync URL pathname with active state to maintain clean and bookmarkable URLs
   useEffect(() => {
+    if (loading) return;
     let path = '/';
     if (onboardingState === 'dashboard') {
       path = `/${activeTab}`;
@@ -112,13 +135,13 @@ function App() {
     if (window.location.pathname !== path) {
       window.history.pushState(null, '', path);
     }
-  }, [activeTab, onboardingState, authInitialTab]);
+  }, [activeTab, onboardingState, authInitialTab, loading]);
 
   // Read URL pathname on load/popstate to restore the correct active tab/page
   useEffect(() => {
     const handlePathChange = () => {
       const path = window.location.pathname.replace(/^\//, ''); // remove leading slash
-      const validTabs = ['overview', 'analytics', 'service', 'info', 'promotions', 'faq', 'staff', 'bookings', 'chat', 'sandbox', 'settings'];
+      const validTabs = ['overview', 'analytics', 'service', 'info', 'promotions', 'faq', 'staff', 'bookings', 'chat', 'sandbox', 'settings', 'support'];
       
       if (path === 'login') {
         setOnboardingState('auth');
@@ -127,7 +150,7 @@ function App() {
         setOnboardingState('auth');
         setAuthInitialTab('signup');
       } else if (path === 'onboarding') {
-        const savedUser = localStorage.getItem('genie_ai_user');
+        const savedUser = readAuthValue('genie_ai_user');
         if (savedUser) {
           setOnboardingState('onboard_upload');
         } else {
@@ -137,7 +160,12 @@ function App() {
       } else if (path === 'home' || !path) {
         setOnboardingState('home');
       } else if (path && validTabs.includes(path)) {
-        setActiveTab(path);
+        if (readAuthValue('genie_ai_user')) {
+          setActiveTab(path);
+        } else {
+          setOnboardingState('auth');
+          setAuthInitialTab('login');
+        }
       }
     };
 
@@ -159,26 +187,6 @@ function App() {
     localStorage.setItem('genie_ai_theme', theme);
   }, [theme]);
 
-  // Check if session exists in localStorage
-  useEffect(() => {
-    const savedUser = localStorage.getItem('genie_ai_user');
-    if (savedUser) {
-      const parsedUser = reconcileTenant(JSON.parse(savedUser));
-      setUser(parsedUser);
-      checkUserOnboardingStatus(parsedUser);
-    } else {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Auto-redirect logged-in users away from auth screen to dashboard or onboarding
-  useEffect(() => {
-    if (user && onboardingState === 'auth') {
-      checkUserOnboardingStatus(user);
-    }
-  }, [user, onboardingState]);
-
   // The JWT is the single source of truth for tenant identity: its `sub` claim IS
   // the tenant_id, and every tenant-scoped endpoint compares the path tenant_id to
   // the token's (403 on mismatch). Deriving tenant_id from the token — rather than a
@@ -187,7 +195,7 @@ function App() {
   const reconcileTenant = (u) => {
     if (!u) return u;
     try {
-      const token = localStorage.getItem('genie_ai_token');
+      const token = readAuthValue('genie_ai_token');
       if (!token) return u;
       const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
       if (payload?.sub && payload.sub !== u.tenant_id) {
@@ -210,6 +218,24 @@ function App() {
     }
   };
 
+  const applyProfileToUser = (currentUser, profile) => {
+    if (!currentUser || !profile?.company_name) return currentUser;
+    const updatedUser = {
+      ...currentUser,
+      company_name: profile.company_name,
+      business_type: profile.business_type || currentUser.business_type
+    };
+    const lowerName = profile.company_name.toLowerCase();
+    if (!updatedUser.business_type && (lowerName.includes('clinic') || lowerName.includes('ทันตกรรม') || lowerName.includes('ฟัน') || lowerName.includes('แพทย์'))) {
+      updatedUser.business_type = lang === 'th' ? 'คลินิกทันตกรรม' : 'Dental Clinic';
+    } else if (!updatedUser.business_type && (lowerName.includes('ยา') || lowerName.includes('pharmacy') || lowerName.includes('drug'))) {
+      updatedUser.business_type = lang === 'th' ? 'ร้านขายยา' : 'Pharmacy';
+    }
+    setUser(updatedUser);
+    authStorage().setItem('genie_ai_user', JSON.stringify(updatedUser));
+    return updatedUser;
+  };
+
   const checkUserOnboardingStatus = async (currentUser) => {
     // If the path is '/' (empty path) or 'home', stay on home and do not redirect
     const path = window.location.pathname.replace(/^\//, '');
@@ -220,7 +246,7 @@ function App() {
     }
 
     try {
-      const profile = await fetchJsonSafe(`/api/tenant/profile/${currentUser.tenant_id}`, {});
+      const profile = await fetchJsonSafe(`/api/tenant/profile/${currentUser.tenant_id}`, null);
 
       // Route on the explicit onboarding_completed flag (set when the owner
       // confirms their profile). Backward-compat: legacy accounts that finished
@@ -229,23 +255,14 @@ function App() {
       // completed onboarding must reach the dashboard even if its docs were
       // removed, and an incomplete account (docs but no confirmation, e.g. an
       // interrupted signup) correctly stays in onboarding.
-      const onboardingDone = Boolean(profile && (profile.onboarding_completed || profile.company_name));
+      const onboardingDone = profile
+        ? Boolean(profile.onboarding_completed || profile.company_name)
+        : path !== 'onboarding';
 
       setIsNewUser(!onboardingDone);
 
       if (profile && profile.company_name) {
-        const updatedUser = {
-          ...currentUser,
-          company_name: profile.company_name
-        };
-        const lowerName = profile.company_name.toLowerCase();
-        if (lowerName.includes('clinic') || lowerName.includes('ทันตกรรม') || lowerName.includes('ฟัน') || lowerName.includes('แพทย์')) {
-          updatedUser.business_type = lang === 'th' ? 'คลินิกทันตกรรม' : 'Dental Clinic';
-        } else if (lowerName.includes('ยา') || lowerName.includes('pharmacy') || lowerName.includes('drug')) {
-          updatedUser.business_type = lang === 'th' ? 'ร้านขายยา' : 'Pharmacy';
-        }
-        setUser(updatedUser);
-        localStorage.setItem('genie_ai_user', JSON.stringify(updatedUser));
+        applyProfileToUser(currentUser, profile);
       }
 
       if (!onboardingDone) {
@@ -259,35 +276,60 @@ function App() {
       }
     } catch (e) {
       console.error("Error verifying onboarding state:", e);
-      setOnboardingState('dashboard');
+      setOnboardingState('onboard_upload');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAuthSuccess = (authenticatedUser) => {
-    // Persist the JWT (covers both credentials and Google paths, which both
-    // reach here). The global fetch wrapper reads it from localStorage.
-    if (authenticatedUser?.access_token) {
-      localStorage.setItem('genie_ai_token', authenticatedUser.access_token);
+  // Restore either a persistent login or this tab's session login.
+  useEffect(() => {
+    const savedUser = readAuthValue('genie_ai_user');
+    if (savedUser) {
+      const parsedUser = reconcileTenant(JSON.parse(savedUser));
+      setUser(parsedUser);
+      checkUserOnboardingStatus(parsedUser);
+    } else {
+      setLoading(false);
     }
-    // Keep tenant_id in lockstep with the freshly stored token (avoids 403s).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto-redirect logged-in users away from auth screen to dashboard or onboarding.
+  useEffect(() => {
+    if (user && onboardingState === 'auth') {
+      checkUserOnboardingStatus(user);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, onboardingState]);
+
+  const handleAuthSuccess = (authenticatedUser, keepLoggedIn = true) => {
+    // The backend stores the JWT in an HttpOnly cookie. Only cache non-secret UI
+    // identity locally so JavaScript never persists administrator credentials.
+    clearAuth();
+    const storage = keepLoggedIn ? localStorage : sessionStorage;
     const reconciled = reconcileTenant(authenticatedUser);
     setUser(reconciled);
-    localStorage.setItem('genie_ai_user', JSON.stringify(reconciled));
+    storage.setItem('genie_ai_user', JSON.stringify(reconciled));
     setLoading(true);
     checkUserOnboardingStatus(reconciled);
   };
 
-  const handleOnboardingComplete = () => {
+  const handleOnboardingComplete = (profile) => {
+    if (profile?.company_name) {
+      applyProfileToUser(user, profile);
+    } else if (user?.tenant_id) {
+      fetchJsonSafe(`/api/tenant/profile/${user.tenant_id}`, null)
+        .then((savedProfile) => applyProfileToUser(user, savedProfile));
+    }
     window.history.pushState(null, '', '/overview');
     setOnboardingState('dashboard');
     setActiveTab('overview');
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('genie_ai_user');
-    localStorage.removeItem('genie_ai_token');
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    clearAuth();
     setUser(null);
     setOnboardingState('auth');
     setActiveTab('overview');
@@ -311,16 +353,18 @@ function App() {
   // Render Homepage
   if (onboardingState === 'home') {
     return (
-      <Homepage
-        lang={lang}
-        setLang={setLang}
-        theme={theme}
-        setTheme={setTheme}
-        onNavigateToAuth={(tab) => {
-          setAuthInitialTab(tab);
-          setOnboardingState('auth');
-        }}
-      />
+      <Suspense fallback={<PageFallback />}>
+        <Homepage
+          lang={lang}
+          setLang={setLang}
+          theme={theme}
+          setTheme={setTheme}
+          onNavigateToAuth={(tab) => {
+            setAuthInitialTab(tab);
+            setOnboardingState('auth');
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -328,14 +372,16 @@ function App() {
   if (onboardingState === 'auth') {
     return (
       <div className="text-foreground bg-background">
-        <AuthPage 
-          lang={lang} 
-          setLang={setLang} 
-          onAuthSuccess={handleAuthSuccess} 
-          initialTab={authInitialTab}
-          onNavigateHome={() => setOnboardingState('home')}
-          onTabChange={(tab) => setAuthInitialTab(tab)}
-        />
+        <Suspense fallback={<PageFallback />}>
+          <AuthPage
+            lang={lang}
+            setLang={setLang}
+            onAuthSuccess={handleAuthSuccess}
+            initialTab={authInitialTab}
+            onNavigateHome={() => setOnboardingState('home')}
+            onTabChange={(tab) => setAuthInitialTab(tab)}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -344,13 +390,15 @@ function App() {
   if (onboardingState === 'onboard_upload') {
     return (
       <div className="text-foreground bg-background">
-        <OnboardingUpload
-          tenantId={user?.tenant_id}
-          user={user}
-          lang={lang}
-          isNew={isNewUser}
-          onOnboardingComplete={handleOnboardingComplete}
-        />
+        <Suspense fallback={<PageFallback />}>
+          <OnboardingUpload
+            tenantId={user?.tenant_id}
+            user={user}
+            lang={lang}
+            isNew={isNewUser}
+            onOnboardingComplete={handleOnboardingComplete}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -368,7 +416,8 @@ function App() {
       bookings: 'การนัดหมาย',
       chat: 'แชท',
       sandbox: 'กล่องทดสอบแชต',
-      settings: 'ตั้งค่า'
+      settings: 'ตั้งค่า',
+      support: 'ช่วยเหลือ'
     },
     en: {
       overview: 'Dashboard',
@@ -381,7 +430,8 @@ function App() {
       bookings: 'Appointments',
       chat: 'Chat',
       sandbox: 'Chat Sandbox',
-      settings: 'Settings'
+      settings: 'Settings',
+      support: 'Support'
     }
   }[lang];
 
@@ -413,17 +463,23 @@ function App() {
             {tabNames[activeTab] || 'Dashboard'}
           </h1>
           
-          {/* Middle: Search Pill Bar */}
-          <div className="hidden md:flex items-center w-[320px] h-9 bg-slate-50 dark:bg-slate-950 border border-slate-200/50 dark:border-white/10 rounded-full px-3.5 gap-2 focus-within:border-[#2B6CB0] transition-colors">
-            <Search size={15} className="text-[#1A365D]/40 dark:text-slate-400" />
-            <input
-              type="text"
-              placeholder={lang === 'th' ? 'ค้นหา...' : 'Search...'}
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              className="bg-transparent text-xs text-[#1A365D] dark:text-white placeholder:text-slate-400 outline-none w-full"
-            />
-          </div>
+          {/* Middle: Search appears only where globalSearch is consumed. */}
+          {['staff', 'bookings'].includes(activeTab) && (
+            <div className="hidden md:flex items-center w-[320px]">
+              <InputGroup className="w-full">
+                <InputGroup.Prefix>
+                  <Search size={15} className="text-[#1A365D]/40 dark:text-slate-400" />
+                </InputGroup.Prefix>
+                <InputGroup.Input
+                  type="search"
+                  aria-label={lang === 'th' ? 'ค้นหา' : 'Search'}
+                  placeholder={lang === 'th' ? 'ค้นหา...' : 'Search...'}
+                  value={globalSearch}
+                  onChange={(e) => setGlobalSearch(e.target.value)}
+                />
+              </InputGroup>
+            </div>
+          )}
           
           {/* Right: Controls & Profile */}
           <div className="flex items-center gap-4">
@@ -536,6 +592,7 @@ function App() {
 
         {/* Main Content Area */}
         <main className="main-content flex-1 bg-slate-50/50 dark:bg-slate-950/20 overflow-y-auto">
+          <Suspense fallback={<PageFallback />}>
           {activeTab === 'overview' && (
             <DashboardOverview tenantId={user?.tenant_id} user={user} lang={lang} setActiveTab={setActiveTab} />
           )}
@@ -551,20 +608,7 @@ function App() {
               triggerReupload={triggerReupload} 
               lang={lang} 
               onProfileUpdate={(updatedProfile) => {
-                if (updatedProfile && updatedProfile.company_name) {
-                  const updatedUser = {
-                    ...user,
-                    company_name: updatedProfile.company_name
-                  };
-                  const lowerName = updatedProfile.company_name.toLowerCase();
-                  if (lowerName.includes('clinic') || lowerName.includes('ทันตกรรม') || lowerName.includes('ฟัน') || lowerName.includes('แพทย์')) {
-                    updatedUser.business_type = lang === 'th' ? 'คลินิกทันตกรรม' : 'Dental Clinic';
-                  } else if (lowerName.includes('ยา') || lowerName.includes('pharmacy') || lowerName.includes('drug')) {
-                    updatedUser.business_type = lang === 'th' ? 'ร้านขายยา' : 'Pharmacy';
-                  }
-                  setUser(updatedUser);
-                  localStorage.setItem('genie_ai_user', JSON.stringify(updatedUser));
-                }
+                applyProfileToUser(user, updatedProfile);
               }}
             />
           )}
@@ -588,6 +632,11 @@ function App() {
           {activeTab === 'settings' && (
             <SettingsPage tenantId={user?.tenant_id} lang={lang} onLogout={handleLogout} />
           )}
+
+          {activeTab === 'support' && (
+            <SupportPage lang={lang} setActiveTab={setActiveTab} />
+          )}
+          </Suspense>
         </main>
         
       </div>

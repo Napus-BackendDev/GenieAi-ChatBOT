@@ -1,5 +1,3 @@
-import React from 'react';
-
 // General Page Skeleton (for Dashboard Overview)
 export const DashboardSkeleton = () => (
   <div className="p-6 md:p-8 w-full max-w-full flex flex-col gap-6 animate-pulse text-left">

@@ -1,13 +1,14 @@
 import os
 import re
+import asyncio
 import logging
 import threading
-import shutil
 import uuid
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
-from app.core.security import require_tenant, get_current_tenant
+from app.core.config import settings
+from app.core.security import create_webchat_token, require_tenant, get_current_tenant
 from app.core.db import db_load_profile, db_save_profile
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,18 @@ SECRET_FIELDS = (
     "facebook_page_access_token",
     "facebook_verify_token",
 )
+
+
+def _detect_image_extension(header: bytes) -> str | None:
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return ".webp"
+    return None
 
 # Path-traversal guard: tenant_id feeds data/tenant_profile_{id}.json and static/images/{id}.
 _TENANT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -82,6 +95,7 @@ class WebchatSettings(BaseModel):
     enabled: bool = True
     theme_color: str = "#2B6CB0"
     welcome_message: str = "สวัสดีค่ะ! ยินดีต้อนรับสู่บริการผู้ช่วย AI ของเรา มีอะไรให้ช่วยวันนี้คะ?"
+    token_version: int = Field(default=1, ge=1)
 
 class AISettings(BaseModel):
     model_name: str = "gpt-4o-mini"
@@ -231,21 +245,49 @@ async def upload_tenant_image(
     _enforce_tenant(tenant_id, current_tenant)
     _validate_tenant_id(tenant_id)
     allowed_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-    ext = os.path.splitext(file.filename)[1].lower()
+    ext = os.path.splitext(os.path.basename(file.filename or ""))[1].lower()
     if ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Only images are allowed (.jpg, .jpeg, .png, .webp, .gif)")
         
-    promo_images_dir = f"static/images/{tenant_id}/promotions"
+    promo_images_dir = os.path.join(
+        settings.STATIC_IMAGES_PATH,
+        tenant_id,
+        "promotions",
+    )
     os.makedirs(promo_images_dir, exist_ok=True)
     
     unique_filename = f"{uuid.uuid4().hex}{ext}"
     target_path = os.path.join(promo_images_dir, unique_filename)
     
+    total_bytes = 0
+    header = b""
     try:
         with open(target_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > settings.MAX_IMAGE_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Image exceeds the upload size limit.",
+                    )
+                if len(header) < 12:
+                    header = (header + chunk)[:12]
+                await asyncio.to_thread(buffer.write, chunk)
+        detected_ext = _detect_image_extension(header)
+        normalized_ext = ".jpg" if ext == ".jpeg" else ext
+        if detected_ext != normalized_ext:
+            raise HTTPException(
+                status_code=400,
+                detail="Image content does not match its filename.",
+            )
+    except HTTPException:
+        if os.path.exists(target_path):
+            await asyncio.to_thread(os.remove, target_path)
+        raise
     except Exception as e:
         logger.error(f"Failed to save uploaded image: {e}")
+        if os.path.exists(target_path):
+            await asyncio.to_thread(os.remove, target_path)
         raise HTTPException(status_code=500, detail="Failed to save uploaded image.")
         
     static_url = f"/static/images/{tenant_id}/promotions/{unique_filename}"
@@ -453,8 +495,31 @@ class SettingsUpdateRequest(BaseModel):
     booking_settings: BookingSettings = BookingSettings()
 
 
-@router.get("/profile/{tenant_id}/settings")
-async def get_settings(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
+class WebchatConfigResponse(BaseModel):
+    token: str
+    script_path: str
+
+
+class SettingsResponse(BaseModel):
+    company_name: str
+    business_hours: str
+    contact_number: str
+    webhook_domain: str
+    webchat_settings: WebchatSettings
+    ai_settings: AISettings
+    booking_settings: BookingSettings
+    line_verified: bool
+    line_configured: bool
+    facebook_configured: bool
+    facebook_page_id: str
+    webchat_config: WebchatConfigResponse
+
+
+@router.get("/profile/{tenant_id}/settings", response_model=SettingsResponse, status_code=200)
+async def get_settings(
+    tenant_id: str,
+    current_tenant: str = Depends(get_current_tenant),
+) -> SettingsResponse:
     _enforce_tenant(tenant_id, current_tenant)
     _validate_tenant_id(tenant_id)
     raw = await db_load_profile(tenant_id) or {}
@@ -465,17 +530,24 @@ async def get_settings(tenant_id: str, current_tenant: str = Depends(get_current
         "company_name", "business_hours", "contact_number", "webhook_domain",
         "webchat_settings", "ai_settings", "booking_settings",
         "line_channel_access_token", "line_channel_secret", "line_verified",
-        "facebook_page_access_token", "facebook_verify_token"
+        "facebook_page_access_token", "facebook_verify_token", "facebook_page_id"
     ]
     res = {k: data.get(k) for k in settings_keys}
     
     res["line_configured"] = bool(str(res.get("line_channel_access_token") or "").strip() and str(res.get("line_channel_secret") or "").strip())
     res["facebook_configured"] = bool(str(res.get("facebook_page_access_token") or "").strip())
+    res["webchat_config"] = {
+        "token": create_webchat_token(
+            tenant_id,
+            data["webchat_settings"].get("token_version", 1),
+        ),
+        "script_path": "/static/widget.js",
+    }
     
     for field in SECRET_FIELDS:
         res.pop(field, None)
         
-    return res
+    return SettingsResponse(**res)
 
 
 @router.post("/profile/{tenant_id}/settings")
@@ -487,6 +559,17 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
     explicit_fields = body.model_fields_set
     
     raw = await db_load_profile(tenant_id) or {}
+
+    requested_page_id = str(body.facebook_page_id or "").strip()
+    if "facebook_page_id" in body.model_fields_set and requested_page_id:
+        from app.core.db import db_resolve_tenant_by_fb_page_id
+
+        owner = await db_resolve_tenant_by_fb_page_id(requested_page_id)
+        if owner and owner != tenant_id:
+            raise HTTPException(
+                status_code=409,
+                detail="This Facebook Page ID is already assigned to another account.",
+            )
     
     for field in SettingsUpdateRequest.model_fields.keys():
         if field not in explicit_fields:
@@ -527,6 +610,10 @@ async def delete_tenant_account(tenant_id: str, current_tenant: str = Depends(ge
     from app.services.rag import get_chroma_client, CHROMA_COLLECTION_NAME
     
     try:
+        # Delete authoritative records first. If MongoDB fails, leave derived
+        # vector/image data intact and report failure instead of a partial wipe.
+        await db_delete_tenant_data(tenant_id)
+
         # 1. Delete ChromaDB vector embeddings
         try:
             client = get_chroma_client()
@@ -537,7 +624,7 @@ async def delete_tenant_account(tenant_id: str, current_tenant: str = Depends(ge
             logger.error(f"Failed to delete ChromaDB collection for tenant '{tenant_id}': {e}")
             
         # 2. Delete static files / uploaded images
-        static_dir = os.path.join("static", "images", tenant_id)
+        static_dir = os.path.join(settings.STATIC_IMAGES_PATH, tenant_id)
         if os.path.exists(static_dir):
             try:
                 shutil.rmtree(static_dir)
@@ -545,10 +632,7 @@ async def delete_tenant_account(tenant_id: str, current_tenant: str = Depends(ge
             except Exception as e:
                 logger.error(f"Failed to delete static images directory {static_dir}: {e}")
                 
-        # 3. Delete database records (users, profiles, bookings, documents metadata)
-        await db_delete_tenant_data(tenant_id)
-        
-        # 4. Delete Redis cache keys (cag context, histories)
+        # 3. Delete Redis cache keys (cag context, histories)
         try:
             redis_client = get_redis()
             # Clear profile cache
@@ -574,5 +658,4 @@ async def delete_tenant_account(tenant_id: str, current_tenant: str = Depends(ge
         
     except Exception as e:
         logger.error(f"Failed to delete account {tenant_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
-
+        raise HTTPException(status_code=500, detail="Failed to delete account.")

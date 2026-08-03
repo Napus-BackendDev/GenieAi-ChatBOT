@@ -46,3 +46,10 @@ def test_rag_context_message_shape():
 def test_empty_profile_does_not_crash():
     ctx = build_profile_context({})
     assert isinstance(ctx, str)
+
+
+def test_staff_expertise_is_not_inferred_from_schedule():
+    prompt = build_system_prompt("rag", "")
+    assert "Distinguish expertise questions from schedule questions" in prompt
+    assert "Never infer expertise from an on-duty list" in prompt
+    assert "only when the customer explicitly asks about a date/day" in prompt

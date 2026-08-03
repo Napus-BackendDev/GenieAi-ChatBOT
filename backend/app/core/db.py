@@ -35,6 +35,11 @@ def _clean_mongo_doc(doc: dict) -> dict:
 def _mongo_db_or_none():
     return get_mongo_db()
 
+
+def _require_local_fallback(operation: str) -> None:
+    if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+        raise RuntimeError(f"MongoDB unavailable during {operation}; local fallback is disabled")
+
 # ==========================================
 # 1. Users Module (Collection: users)
 # ==========================================
@@ -49,6 +54,7 @@ async def db_load_users() -> list[dict]:
         except Exception as e:
             logger.error(f"Error loading users from MongoDB: {e}")
 
+    _require_local_fallback("load users")
     # ponytail: JSON fallback keeps local/dev installs working without MongoDB.
     file_path = _get_users_file_path()
     with _users_lock:
@@ -76,6 +82,7 @@ async def db_save_users(users: list[dict]) -> None:
         except Exception as e:
             logger.error(f"Error saving users to MongoDB: {e}")
 
+    _require_local_fallback("save users")
     # ponytail: JSON fallback is still authoritative when Mongo is absent or errors.
     file_path = _get_users_file_path()
     with _users_lock:
@@ -106,9 +113,12 @@ async def db_load_profile(tenant_id: str) -> dict:
             profile = await db.tenant_profiles.find_one({"tenant_id": tenant_id})
             if profile:
                 return _clean_mongo_doc(profile)
+            if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+                return {}
         except Exception as e:
             logger.error(f"Error loading profile {tenant_id} from MongoDB: {e}")
 
+    _require_local_fallback("load tenant profile")
     # ponytail: Missing Mongo or missing Mongo profile falls back to the existing JSON file.
     file_path = _get_profile_path(tenant_id)
     with _tenant_lock:
@@ -132,7 +142,10 @@ async def db_save_profile(tenant_id: str, profile_data: dict) -> None:
             return
         except Exception as e:
             logger.error(f"Error saving profile {tenant_id} to MongoDB: {e}")
+            if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+                raise
 
+    _require_local_fallback("save tenant profile")
     # ponytail: JSON fallback preserves the current tenant profile file contract.
     file_path = _get_profile_path(tenant_id)
     with _tenant_lock:
@@ -157,6 +170,7 @@ async def db_load_bookings() -> list[dict]:
         except Exception as e:
             logger.error(f"Error loading bookings from MongoDB: {e}")
 
+    _require_local_fallback("load bookings")
     # ponytail: JSON fallback keeps booking creation/listing working without MongoDB.
     file_path = settings.BOOKINGS_JSON_PATH
     with _bookings_lock:
@@ -187,6 +201,7 @@ async def db_save_bookings(bookings: list[dict]) -> None:
         except Exception as e:
             logger.error(f"Error saving bookings to MongoDB: {e}")
 
+    _require_local_fallback("save bookings")
     # ponytail: On Mongo failure, write through to the legacy JSON file instead of crashing.
     file_path = settings.BOOKINGS_JSON_PATH
     with _bookings_lock:
@@ -209,6 +224,7 @@ async def db_delete_booking(booking_id: str) -> bool:
         except Exception as e:
             logger.error(f"Error deleting booking from MongoDB: {e}")
 
+    _require_local_fallback("delete booking")
     file_path = settings.BOOKINGS_JSON_PATH
     with _bookings_lock:
         _ensure_dir_for_file(file_path)
@@ -238,6 +254,7 @@ async def db_load_documents() -> list[dict]:
         except Exception as e:
             logger.error(f"Error loading documents from MongoDB: {e}")
 
+    _require_local_fallback("load documents")
     # ponytail: JSON fallback keeps document metadata available without MongoDB.
     file_path = settings.DOCUMENTS_JSON_PATH
     with _documents_lock:
@@ -267,6 +284,7 @@ async def db_save_documents(docs: list[dict]) -> None:
         except Exception as e:
             logger.error(f"Error saving documents to MongoDB: {e}")
 
+    _require_local_fallback("save documents")
     # ponytail: On Mongo failure, keep writing the legacy documents JSON file.
     file_path = settings.DOCUMENTS_JSON_PATH
     with _documents_lock:
@@ -289,6 +307,7 @@ async def db_delete_document(document_id: str) -> bool:
             logger.error(f"Error deleting document {document_id} from MongoDB: {e}")
             return False
 
+    _require_local_fallback("delete document")
     file_path = settings.DOCUMENTS_JSON_PATH
     with _documents_lock:
         try:
@@ -319,7 +338,11 @@ async def db_delete_tenant_data(tenant_id: str) -> None:
             logger.info(f"Successfully deleted all MongoDB collections for tenant {tenant_id}")
         except Exception as e:
             logger.error(f"Error deleting tenant {tenant_id} from MongoDB: {e}")
+            if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+                raise
 
+    if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+        return
     # JSON fallback deletions
     # 1. Users
     file_path = _get_users_file_path()
@@ -430,6 +453,7 @@ async def db_append_message(tenant_id: str, session_id: str, role: str, content:
         except Exception as e:
             logger.error(f"Error appending message to MongoDB conversations: {e}")
 
+    _require_local_fallback("append conversation")
     # ponytail: JSON fallback keeps the durable inbox working without MongoDB.
     with _conversations_lock:
         convos = _load_conversations_json()
@@ -456,6 +480,7 @@ async def db_list_conversations(tenant_id: str) -> list[dict]:
         except Exception as e:
             logger.error(f"Error listing conversations from MongoDB: {e}")
 
+    _require_local_fallback("list conversations")
     with _conversations_lock:
         convos = [c for c in _load_conversations_json() if c.get("tenant_id") == tenant_id]
     convos.sort(key=lambda c: c.get("updated_at", ""), reverse=True)
@@ -472,6 +497,7 @@ async def db_get_conversation(tenant_id: str, session_id: str) -> dict | None:
         except Exception as e:
             logger.error(f"Error loading conversation from MongoDB: {e}")
 
+    _require_local_fallback("get conversation")
     with _conversations_lock:
         return next((c for c in _load_conversations_json()
                      if c.get("tenant_id") == tenant_id and c.get("session_id") == session_id), None)
@@ -487,6 +513,7 @@ async def db_clear_conversation(tenant_id: str, session_id: str) -> bool:
         except Exception as e:
             logger.error(f"Error deleting conversation from MongoDB: {e}")
 
+    _require_local_fallback("clear conversation")
     with _conversations_lock:
         convos = _load_conversations_json()
         remaining = [c for c in convos if not (c.get("tenant_id") == tenant_id and c.get("session_id") == session_id)]
@@ -517,6 +544,7 @@ async def db_resolve_tenant_by_fb_page_id(page_id: str) -> str | None:
             logger.error(f"Error resolving tenant by FB page id: {e}")
             return None
 
+    _require_local_fallback("resolve Facebook tenant")
     # JSON fallback: scan tenant_profile_*.json for a matching facebook_page_id.
     import glob
     data_dir = os.path.dirname(_get_profile_path("x")) or "data"

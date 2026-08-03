@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Depends
@@ -13,6 +14,14 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 # Marker the AI appends when it decides to hand off to a human agent.
 HANDOFF_MARKER = "[[HANDOFF]]"
+
+
+def _format_sandbox_text(text: str) -> str:
+    from app.routers.webhooks import _strip_markdown
+
+    cleaned = re.sub(r"(?m)^[ \t]*---+[ \t]*$", "\n", _strip_markdown(text))
+    return re.sub(r"\n{3,}", "\n\n", cleaned)
+
 
 class ChatRequest(BaseModel):
     user_message: str
@@ -90,6 +99,9 @@ async def sandbox_chat(req: ChatRequest, current_tenant: str = Depends(get_curre
         if requires_human:
             ai_response = ai_response.replace(HANDOFF_MARKER, "").strip()
 
+        # Keep Sandbox readable without altering valid underscores in identifiers.
+        ai_response = _format_sandbox_text(ai_response)
+
         # 6. Save AI reply to Redis history
         await add_chat_message(session_id=session_id, role="assistant", content=ai_response, tenant_id=tenant_id)
 
@@ -98,8 +110,8 @@ async def sandbox_chat(req: ChatRequest, current_tenant: str = Depends(get_curre
                 from app.core.redis import get_redis
                 redis_client = get_redis()
                 await redis_client.set(f"human_intervention:{tenant_id}:{session_id}", "1")
-            except Exception as re:
-                logger.warning(f"Failed to flag session in Redis: {re}")
+            except Exception as redis_error:
+                logger.warning(f"Failed to flag session in Redis: {redis_error}")
                 
         # Check if response is about promotions → attach promotion images if any
         promo_keywords = ["โปรโมชัน", "โปรโมท", "โปร", "promotion", "ส่วนลด", "ลดราคา", "โปรพิเศษ"]
@@ -355,4 +367,3 @@ async def clear_unread(req: ClearUnreadRequest, current_tenant: str = Depends(ge
     except Exception as e:
         logger.error(f"Error clearing unread for {session_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to clear unread.")
-

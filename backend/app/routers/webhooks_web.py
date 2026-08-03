@@ -1,23 +1,26 @@
 """Web-chat webhook for GenieAI.
 
-A simple same-origin JSON endpoint used by the dashboard's embeddable web widget:
-    POST /api/webhooks/web   { tenant_id, session_id, message }
+A signed JSON endpoint used by the embeddable web widget:
+    POST /api/webhooks/web   { token, session_id, message }
       -> { bubbles: [...], mode, citations, requires_human }
 
 Ponytail: this deliberately reuses the SAME AI pipeline as the LINE webhook
 (`generate_ai_bubbles` below) rather than re-implementing it. It differs from the
 authenticated `/api/chat` sandbox (chat.py) in two ways that justify a separate
-route: (1) it is an unauthenticated same-origin channel endpoint (like the LINE
-webhook, no Bearer token), and (2) it returns pre-split `bubbles` for a chat
+route: (1) it authenticates a public widget token instead of a user's Bearer
+token, and (2) it returns pre-split `bubbles` for a chat
 widget instead of a single `ai_response` string. `generate_ai_bubbles` is the
 single source of the pipeline and is imported by webhooks_facebook.py too.
 """
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.security import decode_webchat_token
+from app.core.config import settings
 from app.services.redis_service import get_chat_history, add_chat_message
 from app.services.rag import retrieve_hybrid_context
 from app.services.openai_service import chat_completion_with_tools
@@ -150,30 +153,109 @@ async def generate_ai_bubbles(
 
 
 class WebChatRequest(BaseModel):
-    message: str = Field(..., min_length=1)
-    session_id: str = Field(default="web_session", min_length=1)
-    # ponytail: single-tenant for now — mirrors the LINE webhook. When multi-tenant
-    # web widgets ship, derive tenant_id from a signed widget key / origin mapping
-    # instead of trusting the request body.
-    tenant_id: str = "default"
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(..., min_length=1, max_length=4096)
+    message: str = Field(..., min_length=1, max_length=4000)
+    session_id: str = Field(
+        default="web_session",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
 
 
-@router.post("/web")
-async def web_webhook(req: WebChatRequest) -> dict:
-    """Same-origin web-chat endpoint. Returns pre-split chat bubbles.
+class WebChatDiagnostics(BaseModel):
+    mode: str
+    citations: list = Field(default_factory=list)
+    skipped: bool
 
-    No signature (same-origin from the dashboard widget). Nothing sensitive is
-    derived from the body beyond the message, session id, and tenant id.
-    """
-    # Multi-tenant routing: the widget names its tenant_id in the body. Reject a
-    # blank/unknown tenant so messages can't scatter into a 'default' bucket or
-    # probe another tenant's knowledge base. (A signed widget key can replace this
-    # trust-the-body check later; rejecting unknown tenants is the safe minimum.)
-    from app.core.db import db_tenant_exists
-    tenant_id = (req.tenant_id or "").strip()
+
+class WebChatResponse(BaseModel):
+    bubbles: list[str]
+    requires_human: bool
+    diagnostics: WebChatDiagnostics
+
+
+async def _enforce_widget_rate_limits(tenant_id: str, session_id: str, client_ip: str) -> None:
+    """Bound public-widget cost by session, caller, and tenant."""
+    from app.core.redis import get_redis
+    from app.core.rate_limit import increment_with_expiry
+
+    limits = (
+        (f"webchat:rate:session:{tenant_id}:{session_id}", 20, 60),
+        (f"webchat:rate:ip:{tenant_id}:{client_ip}", 60, 60),
+        (f"webchat:rate:tenant:{tenant_id}", 1000, 86400),
+    )
+    try:
+        redis_client = get_redis()
+        for key, limit, window in limits:
+            count = await increment_with_expiry(redis_client, key, window)
+            if count > limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Web chat rate limit exceeded. Please try again later.",
+                    headers={"Retry-After": str(window)},
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Web chat rate limiter unavailable: %s", exc)
+        if settings.is_production:
+            raise HTTPException(
+                status_code=503,
+                detail="Web chat is temporarily unavailable.",
+            )
+
+
+_WIDGET_FRAME_HTML = """<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>GenieAI Web Chat</title>
+</head>
+<body>
+  <script src="/static/widget.js" defer></script>
+</body>
+</html>"""
+
+
+@router.get("/web/widget", response_class=HTMLResponse, include_in_schema=False)
+async def web_widget_frame() -> HTMLResponse:
+    """Serve an isolated frame so third-party embeds need no broad CORS."""
+    return HTMLResponse(
+        _WIDGET_FRAME_HTML,
+        headers={
+            "Content-Security-Policy": (
+                "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; "
+                "connect-src 'self'; frame-ancestors *"
+            ),
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.post("/web", response_model=WebChatResponse, status_code=200)
+async def web_webhook(req: WebChatRequest, request: Request) -> WebChatResponse:
+    """Verify the widget token, derive its tenant, and return chat bubbles."""
+    from app.core.db import db_load_profile, db_tenant_exists
+
+    claims = decode_webchat_token(req.token)
+    tenant_id = claims["sub"]
     if not await db_tenant_exists(tenant_id):
-        logger.warning(f"Web chat rejected: unknown tenant_id '{tenant_id}'.")
+        logger.warning("Web chat rejected: token references an unknown tenant.")
         raise HTTPException(status_code=404, detail="Unknown tenant")
+    profile = await db_load_profile(tenant_id) or {}
+    webchat_settings = profile.get("webchat_settings") or {}
+    if not webchat_settings.get("enabled", True):
+        raise HTTPException(status_code=403, detail="Web chat is disabled")
+    if claims.get("ver") != webchat_settings.get("token_version", 1):
+        raise HTTPException(status_code=401, detail="Web chat token has been revoked")
+    from app.core.client_ip import get_client_ip
+    client_ip = get_client_ip(request)
+    await _enforce_widget_rate_limits(tenant_id, req.session_id, client_ip)
     try:
         result = await generate_ai_bubbles(
             tenant_id=tenant_id,
@@ -186,12 +268,12 @@ async def web_webhook(req: WebChatRequest) -> dict:
         logger.error(f"Error in web_webhook: {e}")
         raise HTTPException(status_code=500, detail="Failed to process chat message.")
 
-    return {
-        "bubbles": result["bubbles"],
-        "requires_human": result["requires_human"],
-        "diagnostics": {
-            "mode": result["mode"],
-            "citations": result["citations"],
-            "skipped": result["skipped"],
-        },
-    }
+    return WebChatResponse(
+        bubbles=result["bubbles"],
+        requires_human=result["requires_human"],
+        diagnostics=WebChatDiagnostics(
+            mode=result["mode"],
+            citations=result["citations"],
+            skipped=result["skipped"],
+        ),
+    )

@@ -75,9 +75,9 @@ const PALETTE = ['#2B6CB0', '#A2D9E8', '#1A365D', '#38A169', '#D97706', '#7C3AED
 
 const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
   const t = translations[lang || 'th'];
-  const monthLabels = lang === 'th'
+  const monthLabels = useMemo(() => lang === 'th'
     ? ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
-    : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'], [lang]);
 
   const [bookings, setBookings] = useState([]);
   const [documentsCount, setDocumentsCount] = useState(0);
@@ -165,9 +165,8 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
     }
   };
 
-  const now = Date.now();
   const upcomingCount = useMemo(
-    () => bookings.filter(b => new Date(b.booking_datetime).getTime() >= now).length,
+    () => bookings.filter(b => new Date(b.booking_datetime).getTime() >= Date.now()).length,
     [bookings]
   );
 
@@ -179,7 +178,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
 
   const nextBooking = useMemo(
     () => [...bookings]
-      .filter(b => new Date(b.booking_datetime).getTime() >= now)
+      .filter(b => new Date(b.booking_datetime).getTime() >= Date.now())
       .sort((a, b) => new Date(a.booking_datetime) - new Date(b.booking_datetime))[0],
     [bookings]
   );
@@ -216,7 +215,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
       out.push({ label: monthLabels[d.getMonth()], count });
     }
     return out;
-  }, [bookings, lang]);
+  }, [bookings, monthLabels]);
   const maxMonthly = Math.max(1, ...monthlyChart.map(m => m.count));
   const hasBookings = bookings.length > 0;
 

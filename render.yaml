@@ -6,11 +6,10 @@ services:
     name: genieai-backend
     runtime: python
     rootDir: backend                    # the FastAPI app lives in backend/
-    plan: free                          # 'free' spins down after 15 min idle + WIPES data on redeploy.
-                                        # Change to 'starter' (paid) to attach the persistent disk below.
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /
+    healthCheckPath: /health/ready
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
@@ -19,6 +18,22 @@ services:
       # data/.jwt_secret in production — the free filesystem is wiped on redeploy.)
       - key: JWT_SECRET
         generateValue: true
+      - key: WEBCHAT_JWT_SECRET
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: ALLOW_MOCK_LOGIN
+        value: "false"
+      - key: ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS
+        value: "false"
+      - key: ALLOW_LOCAL_DATA_FALLBACK
+        value: "false"
+      - key: EXPOSE_ACCESS_TOKEN
+        value: "false"
+      # Keep browser auth same-site. Route /api through the frontend's HTTPS
+      # reverse proxy/custom domain instead of calling Render cross-site.
+      - key: SESSION_COOKIE_SAMESITE
+        value: "lax"
       # --- Secrets: set these values in the Render dashboard (sync:false = not in git) ---
       - key: OPENAI_API_KEY
         sync: false
@@ -30,16 +45,22 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: MONGODB_URI
+        sync: false
       - key: CORS_ORIGINS               # your Vercel URL, e.g. https://genieai.vercel.app
         sync: false
+      - key: TRUSTED_HOSTS
+        sync: false
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: TRUSTED_PROXY_NETWORKS
+        value: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      - key: CHROMA_DB_PATH
+        value: data/chroma
+      - key: STATIC_IMAGES_PATH
+        value: data/images
 
-    # ---------------------------------------------------------------------------
-    # PERSISTENT DATA (paid plans only). Without this, users/bookings/tenant
-    # profiles/documents/ChromaDB reset on every redeploy/restart. To keep data:
-    #   1. set  plan: starter  (above)
-    #   2. uncomment the disk block below
-    # ---------------------------------------------------------------------------
-    # disk:
-    #   name: genieai-data
-    #   mountPath: /opt/render/project/src/backend/data
-    #   sizeGB: 1
+    disk:
+      name: genieai-data
+      mountPath: /opt/render/project/src/backend/data
+      sizeGB: 2

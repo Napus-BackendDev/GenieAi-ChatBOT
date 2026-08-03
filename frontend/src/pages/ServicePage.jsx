@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { FileText, Save, Trash2, Upload, Plus, AlertCircle, CheckCircle, Settings, Tag, HelpCircle, Grid, ChevronLeft, ChevronRight, Search, Filter, Calendar, Edit3, ChevronDown } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@heroui/react';
 import { TableSkeleton } from '../components/SkeletonLoader';
@@ -285,7 +285,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
   const [faqModalOpen, setFaqModalOpen] = useState(false);
   const [faqModalMode, setFaqModalMode] = useState('add'); // 'add' or 'edit'
 
-  const fetchProfileAndDocs = async () => {
+  const fetchProfileAndDocs = useCallback(async () => {
     try {
       setLoading(true);
       const profileRes = await fetch(`/api/tenant/profile/${tenantId}`);
@@ -300,11 +300,11 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchProfileAndDocs();
-  }, [tenantId]);
+  }, [fetchProfileAndDocs]);
 
   const saveProfileData = async (subpath, payload) => {
     setSaving(true);
@@ -495,7 +495,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     const promos = (profile && profile.promotions) || [];
     const campaignNames = new Set();
     promos.forEach(promo => {
-      let mainName = '';
+      let mainName;
       const nameMatch = promo.name.match(/^(.+?)\s*\((.+?)\)$/);
       if (nameMatch) {
         mainName = nameMatch[1].trim();
@@ -522,7 +522,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
           (promo.conditions && promo.conditions.toLowerCase().includes(query));
 
         // Campaign selection check
-        let mainName = '';
+        let mainName;
         const nameMatch = promo.name.match(/^(.+?)\s*\((.+?)\)$/);
         if (nameMatch) {
           mainName = nameMatch[1].trim();
@@ -540,8 +540,8 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     // 2. Group the filtered items
     const groups = {};
     filteredPromos.forEach(promo => {
-      let mainName = '';
-      let subName = '';
+      let mainName;
+      let subName;
       const nameMatch = promo.name.match(/^(.+?)\s*\((.+?)\)$/);
       if (nameMatch) {
         mainName = nameMatch[1].trim();
@@ -588,7 +588,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
     let updatedPromos = [...(profile.promotions || [])];
     
     updatedPromos = updatedPromos.map(promo => {
-      let mainName = '';
+      let mainName;
       const nameMatch = promo.name.match(/^(.+?)\s*\((.+?)\)$/);
       if (nameMatch) {
         mainName = nameMatch[1].trim();
@@ -771,6 +771,8 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                           onClick={() => removeServiceRow(idx)}
                           isIconOnly
                           variant="light"
+                          aria-label={lang === 'th' ? 'ลบบริการ' : 'Remove service'}
+                          title={lang === 'th' ? 'ลบบริการ' : 'Remove service'}
                           className="border border-[#E53E3E]/10 hover:bg-[#E53E3E]/10 rounded-xl cursor-pointer text-[#E53E3E] w-11 h-11 shrink-0"
                         >
                           <Trash2 size={15} />
@@ -896,6 +898,8 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                               onClick={() => removeCustomRuleRow(idx)}
                               isIconOnly
                               variant="light"
+                              aria-label={lang === 'th' ? 'ลบกฎ' : 'Remove rule'}
+                              title={lang === 'th' ? 'ลบกฎ' : 'Remove rule'}
                               className="border border-[#E53E3E]/10 hover:bg-[#E53E3E]/10 rounded-xl cursor-pointer text-[#E53E3E] w-11 h-11 shrink-0"
                             >
                               <Trash2 size={15} />
@@ -956,6 +960,8 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                           onClick={() => handleDeleteDocument(doc.document_id)}
                           isIconOnly
                           variant="light"
+                          aria-label={lang === 'th' ? `ลบเอกสาร ${doc.document_name}` : `Delete document ${doc.document_name}`}
+                          title={lang === 'th' ? 'ลบเอกสาร' : 'Delete document'}
                           className="border border-[#E53E3E]/10 hover:bg-[#E53E3E]/10 rounded-xl text-[#E53E3E] w-9 h-9"
                         >
                           <Trash2 size={14} />
@@ -1094,11 +1100,14 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                         <div className="relative group/carousel">
                           {/* Left Arrow Button */}
                           <button 
+                            type="button"
+                            aria-label={lang === 'th' ? 'เลื่อนโปรโมชั่นไปทางซ้าย' : 'Scroll promotions left'}
+                            title={lang === 'th' ? 'เลื่อนไปทางซ้าย' : 'Scroll left'}
                             onClick={() => {
                               const el = document.getElementById(`scroll-${campaign.name}`);
                               if (el) el.scrollBy({ left: -320, behavior: 'smooth' });
                             }}
-                            className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur border border-slate-200/50 dark:border-white/5 flex items-center justify-center opacity-0 group-hover/carousel:opacity-100 transition-opacity cursor-pointer shadow-md text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
+                            className="absolute left-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur border border-slate-200/50 dark:border-white/5 flex items-center justify-center opacity-0 group-hover/carousel:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer shadow-md text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
                           >
                             <ChevronLeft size={16} />
                           </button>
@@ -1138,12 +1147,16 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                                     <div className="flex gap-1 shrink-0">
                                       <button 
                                         onClick={() => openEditPromo(promo.originalIndex, promo)} 
+                                        aria-label={lang === 'th' ? 'แก้ไขโปรโมชั่น' : 'Edit promotion'}
+                                        title={lang === 'th' ? 'แก้ไขโปรโมชั่น' : 'Edit promotion'}
                                         className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-[#2B6CB0] flex items-center justify-center cursor-pointer transition-colors"
                                       >
                                         <Settings size={11} />
                                       </button>
                                       <button 
                                         onClick={() => deletePromo(promo.originalIndex)} 
+                                        aria-label={lang === 'th' ? 'ลบโปรโมชั่น' : 'Delete promotion'}
+                                        title={lang === 'th' ? 'ลบโปรโมชั่น' : 'Delete promotion'}
                                         className="w-6 h-6 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center cursor-pointer hover:bg-red-500/20 transition-colors"
                                       >
                                         <Trash2 size={11} />
@@ -1166,11 +1179,14 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                           
                           {/* Right Arrow Button */}
                           <button 
+                            type="button"
+                            aria-label={lang === 'th' ? 'เลื่อนโปรโมชั่นไปทางขวา' : 'Scroll promotions right'}
+                            title={lang === 'th' ? 'เลื่อนไปทางขวา' : 'Scroll right'}
                             onClick={() => {
                               const el = document.getElementById(`scroll-${campaign.name}`);
                               if (el) el.scrollBy({ left: 320, behavior: 'smooth' });
                             }}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur border border-slate-200/50 dark:border-white/5 flex items-center justify-center opacity-0 group-hover/carousel:opacity-100 transition-opacity cursor-pointer shadow-md text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-white/80 dark:bg-slate-900/80 backdrop-blur border border-slate-200/50 dark:border-white/5 flex items-center justify-center opacity-0 group-hover/carousel:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer shadow-md text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
                           >
                             <ChevronRight size={16} />
                           </button>
@@ -1225,8 +1241,8 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                           <span>{faq.question}</span>
                         </h4>
                         <div className="flex gap-1 shrink-0">
-                          <button onClick={() => openEditFaq(idx, faq)} className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-[#2B6CB0] flex items-center justify-center cursor-pointer"><Settings size={11} /></button>
-                          <button onClick={() => deleteFaq(idx)} className="w-6 h-6 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center cursor-pointer"><Trash2 size={11} /></button>
+                          <button onClick={() => openEditFaq(idx, faq)} aria-label={lang === 'th' ? 'แก้ไขคำถาม' : 'Edit FAQ'} title={lang === 'th' ? 'แก้ไขคำถาม' : 'Edit FAQ'} className="w-6 h-6 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-[#2B6CB0] flex items-center justify-center cursor-pointer"><Settings size={11} /></button>
+                          <button onClick={() => deleteFaq(idx)} aria-label={lang === 'th' ? 'ลบคำถาม' : 'Delete FAQ'} title={lang === 'th' ? 'ลบคำถาม' : 'Delete FAQ'} className="w-6 h-6 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center cursor-pointer"><Trash2 size={11} /></button>
                         </div>
                       </div>
                       <div className="text-xs text-slate-500 font-medium flex items-start gap-2 pl-6">

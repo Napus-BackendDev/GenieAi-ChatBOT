@@ -28,7 +28,8 @@ const translations = {
     imagesHeader: "ภาพอ้างอิงประกอบ (Attached Graphics)",
     noImages: "ไม่มีภาพประกอบตรงกับข้อมูลที่ค้นพบ",
     imgLabel: "ภาพประกอบ",
-    imgLoadError: "ไม่สามารถโหลดภาพได้"
+    imgLoadError: "ไม่สามารถโหลดภาพได้",
+    sendMessage: "ส่งข้อความ"
   },
   en: {
     welcomeAssistant: "Hello! Welcome to the AI Business Assistant sandbox. You can try asking questions about services, prices, promotions, or try making a booking to test the system flow.",
@@ -55,7 +56,8 @@ const translations = {
     imagesHeader: "Attached Graphics",
     noImages: "No graphics match the retrieved information.",
     imgLabel: "Graphics",
-    imgLoadError: "Failed to load graphic"
+    imgLoadError: "Failed to load graphic",
+    sendMessage: "Send message"
   }
 };
 
@@ -86,10 +88,12 @@ const ChatSandbox = ({ tenantId, lang }) => {
 
   // Sync initial message on language change if it is the only message
   useEffect(() => {
-    if (messages.length === 1 && (messages[0].content === translations.th.welcomeAssistant || messages[0].content === translations.en.welcomeAssistant)) {
-      setMessages([{ role: 'assistant', content: t.welcomeAssistant }]);
-    }
-  }, [lang]);
+    setMessages((current) => (
+      current.length === 1 && (current[0].content === translations.th.welcomeAssistant || current[0].content === translations.en.welcomeAssistant)
+        ? [{ role: 'assistant', content: t.welcomeAssistant }]
+        : current
+    ));
+  }, [t.welcomeAssistant]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
@@ -237,6 +241,8 @@ const ChatSandbox = ({ tenantId, lang }) => {
               type="submit" 
               color="primary" 
               isIconOnly 
+              aria-label={t.sendMessage}
+              title={t.sendMessage}
               disabled={loading || !inputMsg.trim()} 
               className="w-12 h-12 rounded-xl cursor-pointer"
             >

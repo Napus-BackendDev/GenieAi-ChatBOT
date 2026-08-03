@@ -76,7 +76,11 @@ def test_garbage_token_is_401():
 
 def test_bad_signature_is_401():
     # A structurally valid token signed with the wrong key must be rejected.
-    forged = jwt.encode({"sub": "tenant-x"}, "the-wrong-key", algorithm="HS256")
+    forged = jwt.encode(
+        {"sub": "tenant-x"},
+        "the-wrong-key-with-at-least-32-bytes",
+        algorithm="HS256",
+    )
     with pytest.raises(HTTPException) as exc:
         get_current_tenant(f"Bearer {forged}")
     assert exc.value.status_code == 401
@@ -214,6 +218,10 @@ def test_login_credentials_returns_access_token(client, monkeypatch, tmp_path):
     assert body["token_type"] == "bearer"
     assert body["access_token"]
     assert "password_hash" not in body
+    cookie = r.headers.get("set-cookie", "")
+    assert "genieai_session=" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
 
     # The issued token must resolve back to the new tenant.
     assert get_current_tenant(f"Bearer {body['access_token']}") == body["tenant_id"]

@@ -3,28 +3,22 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-// Global authed-fetch wrapper: attaches the JWT to every /api/* call (except the
-// login endpoint) so all pages using raw fetch('/api/...') are authenticated in
-// one place. On a 401 it clears the stale session and reloads to the login screen.
+// API authentication uses an HttpOnly same-site cookie. Always include
+// credentials and clear only the non-secret UI identity cache on a stale session.
 const originalFetch = window.fetch.bind(window)
 window.fetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : (input && input.url) || ''
   const isApi = url.startsWith('/api/')
   const isLogin = url.startsWith('/api/auth/login')
-  const token = localStorage.getItem('genie_ai_token')
-
-  let options = init
-  if (isApi && !isLogin && token) {
-    const headers = new Headers((input && input.headers) || init.headers || {})
-    headers.set('Authorization', `Bearer ${token}`)
-    options = { ...init, headers }
-  }
+  const options = isApi ? { ...init, credentials: 'include' } : init
 
   const response = await originalFetch(input, options)
 
   if (isApi && !isLogin && response.status === 401) {
-    localStorage.removeItem('genie_ai_token')
-    localStorage.removeItem('genie_ai_user')
+    ;[localStorage, sessionStorage].forEach((storage) => {
+      storage.removeItem('genie_ai_token')
+      storage.removeItem('genie_ai_user')
+    })
     window.location.reload()
   }
 

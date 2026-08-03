@@ -3,13 +3,17 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 backend/venv/
+backend/backend-dev*.log
 
 # Environment / Secrets
 .env
 .env.*
+!.env.example
+!backend/.env.example
 
 # Data (local dev only)
 data/chroma/
+backend/data/chroma/
 
 # PII / secret data files — local JSON storage (contain customer PII & business data).
 # Ignored going forward; existing tracked copies must be untracked manually

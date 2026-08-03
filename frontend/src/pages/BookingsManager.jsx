@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Calendar as CalendarIcon, Search, Trash2, User, Clock, AlertCircle, ChevronLeft, ChevronRight, Stethoscope, ChevronDown, ChevronUp } from 'lucide-react';
-import { Card, CardContent, Button, Chip, Input } from '@heroui/react';
+import { useCallback, useEffect, useState } from 'react';
+import { Calendar as CalendarIcon, Search, Trash2, User, Clock, AlertCircle, ChevronLeft, ChevronRight, Stethoscope } from 'lucide-react';
+import { Card, CardContent, Button, Input } from '@heroui/react';
 import { BookingsSkeleton } from '../components/SkeletonLoader';
 
 const translations = {
@@ -88,8 +88,6 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('upcoming'); // 'upcoming', 'past', 'all'
   const [error, setError] = useState('');
-  const [isOffDutyExpanded, setIsOffDutyExpanded] = useState(false);
-
   useEffect(() => {
     setSearchTerm(globalSearch || '');
   }, [globalSearch]);
@@ -101,7 +99,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
   const thaiMonths = t.months;
   const weekdays = t.weekdays;
 
-  const fetchBookings = async () => {
+  const fetchBookings = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch(`/api/bookings?tenant_id=${tenantId}`);
@@ -115,9 +113,9 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId, t.loadError]);
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       const response = await fetch(`/api/tenant/profile/${tenantId}`);
       if (response.ok) {
@@ -127,12 +125,12 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
     } catch (e) {
       console.error("Failed to fetch profile:", e);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchBookings();
     fetchProfile();
-  }, [tenantId]);
+  }, [fetchBookings, fetchProfile]);
 
   const getDoctorShiftInfo = (doctor, date) => {
     const scheduleStr = doctor.schedule || "";

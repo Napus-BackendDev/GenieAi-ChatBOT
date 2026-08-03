@@ -1,24 +1,30 @@
 import os
 import logging
+import uuid
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.redis import init_redis, close_redis
-from app.core.mongodb import init_mongo, close_mongo, is_mongo_connected
+from app.core.mongodb import init_mongo, close_mongo, is_mongo_connected, ping_mongo
 from app.routers import webhooks, documents, bookings, auth, tenant, chat
 from app.routers import webhooks_facebook, webhooks_web
 
 # Ensure directories exist before mounting static folder
 os.makedirs("static", exist_ok=True)
-os.makedirs("static/images", exist_ok=True)
+os.makedirs(settings.STATIC_IMAGES_PATH, exist_ok=True)
 os.makedirs("data", exist_ok=True)
 
 # Configure Logger
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[logging.StreamHandler()]
 )
@@ -30,6 +36,7 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown lifecycle events.
     """
     logger.info("Starting up FastAPI application...")
+    settings.validate_runtime()
     
     # 1. Ensure static folders exist
     os.makedirs(settings.STATIC_IMAGES_PATH, exist_ok=True)
@@ -40,12 +47,18 @@ async def lifespan(app: FastAPI):
         await init_redis()
     except Exception as e:
         logger.error(f"Failed to initialize Redis on startup: {e}")
+        if settings.is_production:
+            raise
 
     # 3. Connect to MongoDB (optional — no-op if MONGODB_URI is unset)
     try:
         await init_mongo()
     except Exception as e:
         logger.error(f"Failed to initialize MongoDB on startup: {e}")
+        if settings.is_production:
+            raise
+    if settings.is_production and not is_mongo_connected():
+        raise RuntimeError("MongoDB is required in production")
 
     yield
 
@@ -58,27 +71,49 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
 # Set up CORS Middleware (React Dashboard connection).
 # Explicit allowlist from CORS_ORIGINS env var (comma-separated), defaulting to
 # local Vite dev. Never pair "*" with allow_credentials=True (browser blocks it
 # and it defeats the point of credentialed requests).
-CORS_ORIGINS = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
-    if o.strip()
-]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
-# Mount public static assets directory (to serve PDF-extracted images to LINE/Web chat)
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path != "/api/webhooks/web/widget":
+        response.headers["X-Frame-Options"] = "DENY"
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+# Persisted uploads may live outside the source-controlled static directory.
+app.mount(
+    "/static/images",
+    StaticFiles(directory=settings.STATIC_IMAGES_PATH),
+    name="static-images",
+)
+# Mount public static assets directory (including the versioned widget script).
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Mount Routers
@@ -99,6 +134,42 @@ async def root():
     return {
         "app": settings.PROJECT_NAME,
         "status": "running",
-        "redis_connected": "connected" if os.getenv("REDIS_URL") else "missing",
-        "mongodb_connected": is_mongo_connected()
     }
+
+
+@app.get("/health/live", include_in_schema=False)
+async def health_live():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", include_in_schema=False)
+async def health_ready():
+    from app.core.redis import get_redis
+
+    redis_ready = False
+    try:
+        redis_ready = bool(await get_redis().ping())
+    except Exception:
+        pass
+    mongo_ready = await ping_mongo()
+    chroma_ready = False
+    try:
+        from app.services.rag import get_chroma_client
+
+        chroma_ready = bool(get_chroma_client().heartbeat())
+    except Exception:
+        pass
+    ready = (
+        redis_ready
+        and chroma_ready
+        and (mongo_ready or not settings.is_production)
+    )
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={
+            "status": "ready" if ready else "not_ready",
+            "redis": redis_ready,
+            "mongodb": mongo_ready,
+            "chroma": chroma_ready,
+        },
+    )

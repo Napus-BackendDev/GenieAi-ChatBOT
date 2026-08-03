@@ -1,6 +1,5 @@
 import os
 import re
-import shutil
 import tempfile
 import logging
 import uuid
@@ -12,6 +11,7 @@ from app.services.rag import index_document, delete_document
 from app.routers.tenant import tenant_file_lock, _get_profile_path, _validate_tenant_id
 from app.core.security import get_current_tenant, require_tenant
 from app.core.db import db_load_documents, db_load_profile, db_save_profile
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 import json
@@ -186,6 +186,16 @@ async def extract_all_profile_from_text(text: str) -> dict:
         "4. **staff.schedule สำคัญที่สุด** — ถ้าคู่มือมีเวลาออกตรวจ/ตารางงานของแต่ละคน ต้องคัดลอกมาให้ครบทุกคนแบบคำต่อคำ ห้ามเว้นว่างถ้ามีข้อมูล และห้ามเดาถ้าไม่มี ให้ดึงพนักงานให้ครบทุกคนที่ปรากฏในคู่มือ\n"
         "5. ห้ามเดาวันหมดอายุของโปรโมชัน หากไม่ระบุให้เว้นว่างเป็น \"\" เสมอ\n"
         "6. ตอบเฉพาะข้อความดิบที่เป็น JSON เท่านั้น ไม่มีคำนำหน้า หรือคำอธิบายเพิ่มเติมใดๆ.\n\n"
+        "CRITICAL CLASSIFICATION RULE: Every offer under a heading containing "
+        "Promotion, Special Promotion, โปรโมชั่น, โปรโมชัน, or ข้อเสนอพิเศษ "
+        "belongs in promotions only, never services, even when it names a service and price. "
+        "A Package belongs in promotions only when the source explicitly shows a discount, "
+        "freebie, special/limited price, eligibility condition, or validity period; otherwise "
+        "keep a permanent package in services. "
+        "Put special prices, freebies, and percentage discounts in discount; put eligibility, "
+        "service dates, branch limits, and other restrictions in conditions. Group all bullets "
+        "under the same promotion heading into one promotion record, preserving the bullets in "
+        "description or conditions; never emit several promotion records with the same name.\n\n"
         f"ข้อความ:\n{text}"
     )
 
@@ -305,25 +315,53 @@ async def upload_document(
     in the background. Returns immediately with a job_id the UI can poll for progress.
     tenant_id is derived from the verified token, never from a client parameter.
     """
-    filename_lower = file.filename.lower()
+    safe_filename = os.path.basename(file.filename or "")
+    filename_lower = safe_filename.lower()
     allowed_extensions = (".pdf", ".txt", ".md")
 
     if not filename_lower.endswith(allowed_extensions):
         raise HTTPException(status_code=400, detail="Only PDF, TXT, and MD files are supported in Phase 1.")
 
-    logger.info(f"Received upload request for file: {file.filename} for tenant {tenant_id}")
+    logger.info(f"Received upload request for file: {safe_filename} for tenant {tenant_id}")
 
     # Get file suffix for temp file creation
     _, ext = os.path.splitext(filename_lower)
 
-    # Save the uploaded file to a temporary file (blocking OCR happens later in the background)
+    # Stream to disk with a server-side limit; frontend validation is not a trust boundary.
+    total_bytes = 0
+    first_bytes = b""
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
         try:
-            shutil.copyfileobj(file.file, tmp)
+            while chunk := await file.read(1024 * 1024):
+                total_bytes += len(chunk)
+                if total_bytes > settings.MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="File exceeds the 15 MB upload limit.")
+                if not first_bytes:
+                    first_bytes = chunk[:8192]
+                await asyncio.to_thread(tmp.write, chunk)
             tmp_path = tmp.name
+        except HTTPException:
+            tmp_path = tmp.name
+            await asyncio.to_thread(tmp.close)
+            await asyncio.to_thread(os.remove, tmp_path)
+            raise
         except Exception as e:
+            tmp_path = tmp.name
+            await asyncio.to_thread(tmp.close)
+            if os.path.exists(tmp_path):
+                await asyncio.to_thread(os.remove, tmp_path)
             logger.error(f"Failed to write uploaded file to temp path: {e}")
             raise HTTPException(status_code=500, detail="Could not process file upload.")
+
+    if not first_bytes:
+        await asyncio.to_thread(os.remove, tmp_path)
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if ext == ".pdf" and not first_bytes.lstrip().startswith(b"%PDF-"):
+        await asyncio.to_thread(os.remove, tmp_path)
+        raise HTTPException(status_code=400, detail="Invalid PDF file signature.")
+    if ext in {".txt", ".md"} and b"\x00" in first_bytes:
+        await asyncio.to_thread(os.remove, tmp_path)
+        raise HTTPException(status_code=400, detail="Text uploads must not contain binary data.")
 
     job_id = str(uuid.uuid4())
 
@@ -332,7 +370,7 @@ async def upload_document(
 
     # Spawn heavy work without awaiting it; the request returns instantly.
     # Keep a strong reference so the task isn't GC'd before it finishes.
-    task = asyncio.create_task(_process_upload_job(job_id, tmp_path, file.filename, tenant_id))
+    task = asyncio.create_task(_process_upload_job(job_id, tmp_path, safe_filename, tenant_id))
     _upload_tasks.add(task)
     task.add_done_callback(_upload_tasks.discard)
 

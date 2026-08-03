@@ -76,7 +76,14 @@ def parse_messaging_events(payload: dict) -> list[dict]:
             text = message.get("text")
             sender_id = (messaging.get("sender") or {}).get("id")
             if sender_id and isinstance(text, str) and text.strip():
-                events.append({"sender_id": sender_id, "text": text.strip(), "page_id": page_id})
+                parsed = {
+                    "sender_id": sender_id,
+                    "text": text.strip(),
+                    "page_id": page_id,
+                }
+                if message.get("mid"):
+                    parsed["message_id"] = message["mid"]
+                events.append(parsed)
     return events
 
 
@@ -190,13 +197,32 @@ async def facebook_webhook(
         page_id = event.get("page_id")
         tenant_id = await db_resolve_tenant_by_fb_page_id(page_id)
         if not tenant_id:
+            from app.core.config import settings
+            if not settings.ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS:
+                logger.warning(
+                    f"Facebook page {page_id} is not mapped; event ignored."
+                )
+                continue
             fallback = await get_active_tenant_id()
             logger.warning(
                 f"Facebook page {page_id} not mapped to any tenant; falling back to active tenant {fallback}."
             )
             tenant_id = fallback
+        from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
+        event_id = event.get("message_id")
+        if not await claim_webhook_event(
+            "facebook", tenant_id, event_id
+        ):
+            continue
         background_tasks.add_task(
-            handle_facebook_event, event["sender_id"], event["text"], tenant_id
+            run_claimed_webhook_event,
+            "facebook",
+            tenant_id,
+            event_id,
+            handle_facebook_event,
+            event["sender_id"],
+            event["text"],
+            tenant_id,
         )
 
     # Always 200 quickly so Meta doesn't retry.

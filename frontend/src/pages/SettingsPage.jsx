@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Key, MessageCircle, MessageSquare, Cpu, Save, Copy, Check, Settings, ExternalLink, AlertTriangle, CheckCircle2, XCircle, PlugZap, Trash2 } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@heroui/react';
 
@@ -128,7 +128,8 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
   // Connection status flags (secrets are NEVER returned by GET; only these booleans).
   const [lineConfigured, setLineConfigured] = useState(false);
   const [lineVerified, setLineVerified] = useState(false);
-  const [facebookConfigured, setFacebookConfigured] = useState(false);
+  const [, setFacebookConfigured] = useState(false);
+  const [webchatConfig, setWebchatConfig] = useState({ token: '', script_path: '/static/widget.js' });
 
   // LINE "test connection" result state.
   const [lineTest, setLineTest] = useState({ testing: false, result: null }); // result: { valid, bot_name?, picture_url?, error? }
@@ -164,12 +165,12 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
     }
     return {
       line: `${base}/api/webhooks/line/${tenantId}`,
-      facebook: `${base}/api/webhooks/facebook/${tenantId}`,
+      facebook: `${base}/api/webhooks/facebook`,
       isLocalhost: false // Render URL is public and valid, no need to warn
     };
   })();
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     try {
       setLoading(true);
       const res = await fetch(`/api/tenant/profile/${tenantId}/settings`);
@@ -181,6 +182,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
         setLineConfigured(!!data.line_configured);
         setLineVerified(!!data.line_verified);
         setFacebookConfigured(!!data.facebook_configured);
+        setWebchatConfig(data.webchat_config || { token: '', script_path: '/static/widget.js' });
         setSettings({
           line_channel_access_token: '',
           line_channel_secret: '',
@@ -190,7 +192,8 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
           webchat_settings: {
             enabled: data.webchat_settings?.enabled ?? true,
             theme_color: data.webchat_settings?.theme_color || '#2B6CB0',
-            welcome_message: data.webchat_settings?.welcome_message || 'สวัสดีค่ะ! ยินดีต้อนรับสู่บริการผู้ช่วย AI ของเรา มีอะไรให้ช่วยวันนี้คะ?'
+            welcome_message: data.webchat_settings?.welcome_message || 'สวัสดีค่ะ! ยินดีต้อนรับสู่บริการผู้ช่วย AI ของเรา มีอะไรให้ช่วยวันนี้คะ?',
+            token_version: data.webchat_settings?.token_version ?? 1
           },
           ai_settings: {
             model_name: data.ai_settings?.model_name || 'gpt-4o-mini',
@@ -213,11 +216,11 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   useEffect(() => {
     fetchSettings();
-  }, [tenantId]);
+  }, [fetchSettings]);
 
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== settings.company_name) {
@@ -238,8 +241,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
       const res = await fetch(`/api/tenant/profile/${tenantId}`, {
         method: 'DELETE',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('genie_ai_token')}`
+          'Content-Type': 'application/json'
         }
       });
       
@@ -325,15 +327,17 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
   };
 
   const getWebchatSnippet = () => {
+    const backendUrl = new URL(window.location.origin);
+    if (backendUrl.hostname === 'localhost' || backendUrl.hostname === '127.0.0.1') {
+      backendUrl.port = '8000';
+    }
+    const config = encodeURIComponent(JSON.stringify({
+      token: webchatConfig.token,
+      themeColor: settings.webchat_settings.theme_color,
+      welcomeMessage: settings.webchat_settings.welcome_message
+    }));
     return `<!-- GenieAI Chat Widget -->
-<script>
-  window.GenieAIChatConfig = {
-    tenantId: "${tenantId}",
-    themeColor: "${settings.webchat_settings.theme_color}",
-    welcomeMessage: "${settings.webchat_settings.welcome_message}"
-  };
-</script>
-<script src="${window.location.origin}/static/widget.js" async></script>`;
+<script src="${backendUrl.origin}${webchatConfig.script_path}" data-config="${config}" async></script>`;
   };
 
   if (loading) {

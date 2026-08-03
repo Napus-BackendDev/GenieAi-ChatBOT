@@ -52,7 +52,7 @@ def _strip_markdown(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
     text = re.sub(r'\*(.+?)\*', r'\1', text)
     text = re.sub(r'__(.+?)__', r'\1', text)
-    text = re.sub(r'_(.+?)_', r'\1', text)
+    text = re.sub(r'(?<!\w)_(?!\s)(.+?)(?<!\s)_(?!\w)', r'\1', text)
     text = re.sub(r'```[\s\S]*?```', '', text)
     text = re.sub(r'`(.+?)`', r'\1', text)
     text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
@@ -136,16 +136,15 @@ def build_promo_flex_carousel(promotions: list, base_url: str) -> dict:
     }
 
 
-def load_tenant_promotions(tenant_id: str) -> list:
-    """Load promotions from tenant profile JSON."""
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if not os.path.exists(profile_path):
-        return []
+async def load_tenant_promotions(tenant_id: str) -> list:
+    """Load promotions through the Mongo-first tenant data adapter."""
     try:
-        with open(profile_path, "r", encoding="utf-8") as f:
-            p = json.load(f)
-            return p.get("promotions", [])
-    except Exception:
+        from app.core.db import db_load_profile
+
+        profile = await db_load_profile(tenant_id) or {}
+        return profile.get("promotions", [])
+    except Exception as exc:
+        logger.warning("Could not load promotions for %s: %s", tenant_id, exc)
         return []
 
 
@@ -246,17 +245,17 @@ _HUMANIZE_PROFILES = {
 DEFAULT_HUMANIZE_MODE = "slow"
 
 
-def _load_humanize_mode(tenant_id: str) -> str:
+async def _load_humanize_mode(tenant_id: str) -> str:
     """Reply pacing for a tenant: 'slow' (AIS-like, default) | 'normal' | 'off'."""
-    profile_path = f"data/tenant_profile_{tenant_id}.json"
-    if os.path.exists(profile_path):
-        try:
-            with open(profile_path, "r", encoding="utf-8") as f:
-                mode = (json.load(f).get("ai_settings") or {}).get("humanize_mode")
-            if mode in ("slow", "normal", "off"):
-                return mode
-        except Exception as e:
-            logger.warning(f"Could not read humanize_mode for {tenant_id}: {e}")
+    try:
+        from app.core.db import db_load_profile
+
+        profile = await db_load_profile(tenant_id) or {}
+        mode = (profile.get("ai_settings") or {}).get("humanize_mode")
+        if mode in ("slow", "normal", "off"):
+            return mode
+    except Exception as e:
+        logger.warning(f"Could not read humanize_mode for {tenant_id}: {e}")
     return DEFAULT_HUMANIZE_MODE
 
 
@@ -432,7 +431,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
 
     flex_message = None
     if is_promo_topic:
-        promotions = load_tenant_promotions(tenant_id)
+        promotions = await load_tenant_promotions(tenant_id)
         promos_with_images = [p for p in promotions if p.get("image_url")]
         if promos_with_images:
             flex_message = build_promo_flex_carousel(promos_with_images, base_url)
@@ -461,7 +460,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
 
     # 9. Send bubbles with human-like pacing + LINE's "typing…" animation (AIS-style).
     #    Pacing is per-tenant: 'slow' (default, AIS-like) | 'normal' | 'off'.
-    humanize = _load_humanize_mode(tenant_id)
+    humanize = await _load_humanize_mode(tenant_id)
     params = _HUMANIZE_PROFILES.get(humanize)  # None when mode == 'off'
 
     # First bubble uses the free reply token. In humanize mode, show the typing
@@ -531,6 +530,12 @@ async def line_webhook(
     """
     Fallback endpoint for incoming LINE webhook events (routes to active tenant).
     """
+    from app.core.config import settings
+    if not settings.ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS:
+        raise HTTPException(
+            status_code=404,
+            detail="Use the tenant-specific LINE webhook URL.",
+        )
     active_tenant_id = await get_active_tenant_id()
     _, secret = await get_tenant_line_credentials(active_tenant_id)
     
@@ -553,7 +558,20 @@ async def line_webhook(
     
     logger.info(f"Routing LINE webhook events to active tenant: {active_tenant_id}")
     for event in events:
-        background_tasks.add_task(handle_line_event, event, base_url, active_tenant_id)
+        from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
+        event_id = event.get("webhookEventId")
+        if not await claim_webhook_event("line", active_tenant_id, event_id):
+            continue
+        background_tasks.add_task(
+            run_claimed_webhook_event,
+            "line",
+            active_tenant_id,
+            event_id,
+            handle_line_event,
+            event,
+            base_url,
+            active_tenant_id,
+        )
         
     return {"status": "ok"}
 
@@ -594,7 +612,20 @@ async def line_webhook_tenant(
     
     logger.info(f"Routing LINE webhook events to tenant: {tenant_id}")
     for event in events:
-        background_tasks.add_task(handle_line_event, event, base_url, tenant_id)
+        from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
+        event_id = event.get("webhookEventId")
+        if not await claim_webhook_event("line", tenant_id, event_id):
+            continue
+        background_tasks.add_task(
+            run_claimed_webhook_event,
+            "line",
+            tenant_id,
+            event_id,
+            handle_line_event,
+            event,
+            base_url,
+            tenant_id,
+        )
         
     return {"status": "ok"}
 

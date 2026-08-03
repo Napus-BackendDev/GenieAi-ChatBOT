@@ -5,6 +5,7 @@ from app.routers.webhooks import (
     contains_emoji,
     HANDOFF_MARKER,
 )
+from app.routers.chat import _format_sandbox_text
 
 
 def test_single_bubble_when_short():
@@ -29,6 +30,11 @@ def test_max_bubbles_cap_merges_overflow():
 def test_strip_markdown():
     assert "**" not in _strip_markdown("**bold**")
     assert _strip_markdown("# Heading") == "Heading"
+    assert _strip_markdown("foo_bar_baz@example.com") == "foo_bar_baz@example.com"
+
+
+def test_sandbox_text_removes_bubble_separator_without_corrupting_identifier():
+    assert _format_sandbox_text("Email **foo_bar@example.com**\n---\nNext") == "Email foo_bar@example.com\n\nNext"
 
 
 def test_contains_emoji():

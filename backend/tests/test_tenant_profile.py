@@ -77,6 +77,27 @@ def test_get_profile_missing_file_returns_defaults_without_secrets(profile_path)
     assert data["facebook_configured"] is False
 
 
+def test_settings_preserve_facebook_mapping_and_webchat_token_version(profile_path):
+    profile_path.write_text(
+        json.dumps(
+            {
+                "facebook_page_id": "page-123",
+                "webchat_settings": {
+                    "enabled": True,
+                    "theme_color": "#123456",
+                    "welcome_message": "Hello",
+                    "token_version": 7,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run(tenant.get_settings("t1", "t1"))
+    assert result.facebook_page_id == "page-123"
+    assert result.webchat_settings.token_version == 7
+
+
 # ---------------------------------------------------------------------------
 # (b) save_profile with empty secret must PRESERVE the stored token
 # ---------------------------------------------------------------------------

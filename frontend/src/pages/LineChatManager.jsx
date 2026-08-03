@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, Phone, Video, MoreVertical, Paperclip, Mic, Send, CheckCheck, Edit, Filter, User, Bot, Smile } from 'lucide-react';
+import { useCallback, useState, useEffect, useRef } from 'react';
+import { Search, Phone, Video, MoreVertical, Send, Edit, Filter, User, Bot, Smile } from 'lucide-react';
 import { Button } from '@heroui/react';
 
 const STICKER_LIST = [
@@ -63,7 +63,7 @@ const LineChatManager = ({ tenantId, lang }) => {
   const [showStickers, setShowStickers] = useState(false);
   const chatEndRef = useRef(null);
 
-  const fetchSessions = async (showLoading = false) => {
+  const fetchSessions = useCallback(async (showLoading = false) => {
     if (showLoading) setLoading(true);
     try {
       const res = await fetch(`/api/chat/sessions?tenant_id=${tenantId || 'default'}`);
@@ -72,24 +72,21 @@ const LineChatManager = ({ tenantId, lang }) => {
         setSessions(data);
         
         // Update selected session details if it's currently selected
-        if (selectedSession) {
-          const updated = data.find(s => s.id === selectedSession.id);
-          if (updated) {
-            setSelectedSession(updated);
-          }
-        }
+        setSelectedSession(current => current
+          ? data.find(s => s.id === current.id) || current
+          : current);
       }
     } catch (err) {
       console.error("Error fetching chat sessions:", err);
     } finally {
       if (showLoading) setLoading(false);
     }
-  };
+  }, [tenantId]);
 
   // Initial load
   useEffect(() => {
     fetchSessions(true);
-  }, [tenantId]);
+  }, [fetchSessions]);
 
   // Polling every 5 seconds to get new LINE messages
   useEffect(() => {
@@ -97,7 +94,7 @@ const LineChatManager = ({ tenantId, lang }) => {
       fetchSessions(false);
     }, 5000);
     return () => clearInterval(interval);
-  }, [selectedSession]);
+  }, [fetchSessions, selectedSession]);
 
   // Auto-scroll to bottom of conversation
   useEffect(() => {

@@ -1,6 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
 import { Mail, Lock, ArrowRight, Store, Sparkles, BookOpen } from 'lucide-react';
-import { Button } from '@heroui/react';
+import { Button, Checkbox, InputGroup, Label, TextField } from '@heroui/react';
+import Mascot3D from '../components/Mascot3D';
+
+const mockLoginEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_LOGIN === 'true';
 
 const translations = {
   th: {
@@ -13,6 +16,7 @@ const translations = {
     passwordPlaceholder: "กรอกรหัสผ่านของคุณ",
     keepLoggedIn: "อยู่ในระบบตลอดเวลา",
     forgotPassword: "ลืมรหัสผ่าน?",
+    forgotHelp: "ระบบเวอร์ชันนี้ยังไม่รองรับการรีเซ็ตรหัสผ่านทางอีเมล หากสมัครด้วย Google ให้ใช้ปุ่ม Google เดิม หากใช้รหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ GenieAI ก่อนสร้างบัญชีใหม่เพื่อไม่ให้ข้อมูลร้านสูญหาย",
     loginBtn: "เข้าสู่ระบบ",
     signupBtn: "สมัครสมาชิก",
     noAccount: "ยังไม่มีบัญชีผู้ใช้?",
@@ -36,6 +40,7 @@ const translations = {
     passwordPlaceholder: "Enter your password",
     keepLoggedIn: "Keep me logged in",
     forgotPassword: "Forgot your password?",
+    forgotHelp: "Email password reset is not available in this version. If you registered with Google, use Google sign-in. For password accounts, contact your GenieAI administrator before creating another account so your business data stays attached.",
     loginBtn: "Log In",
     signupBtn: "Sign Up",
     noAccount: "Don't have an account?",
@@ -66,11 +71,12 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
     if (onTabChange) {
       onTabChange(activeTab);
     }
-  }, [activeTab]);
+  }, [activeTab, onTabChange]);
 
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+  const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [sdkLoaded, setSdkLoaded] = useState(false);
 
   const handleCredentialsSubmit = async (e) => {
@@ -85,7 +91,8 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         body: JSON.stringify({
           provider: 'credentials',
           email: email.trim(),
-          password: password
+          password: password,
+          keep_logged_in: keepLoggedIn
         })
       });
 
@@ -97,7 +104,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
       // Whether the account is new or returning, App decides routing:
       // new tenants (no saved profile) are sent into the onboarding wizard,
       // which collects company/business info in its Info step.
-      onAuthSuccess(data);
+      onAuthSuccess(data, keepLoggedIn);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -105,7 +112,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
     }
   };
 
-  const handleGoogleLoginResponse = async (googleRes) => {
+  const handleGoogleLoginResponse = useCallback(async (googleRes) => {
     setError('');
     setLoading(true);
 
@@ -115,7 +122,8 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           provider: 'google',
-          token: googleRes.credential
+          token: googleRes.credential,
+          keep_logged_in: keepLoggedIn
         })
       });
 
@@ -127,13 +135,13 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
       // Pass the provider's account straight through (do NOT inject a mock
       // email/phone). App routes new tenants into the wizard, which collects
       // any missing phone in its Info step.
-      onAuthSuccess(data);
+      onAuthSuccess(data, keepLoggedIn);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [keepLoggedIn, onAuthSuccess]);
 
   useEffect(() => {
     if (window.google) {
@@ -175,13 +183,13 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         );
       }
     }
-  }, [sdkLoaded, activeTab]);
+  }, [sdkLoaded, activeTab, handleGoogleLoginResponse]);
 
   return (
-    <div className="flex min-h-screen w-full items-stretch overflow-hidden bg-[#FFFFFF] transition-colors duration-300">
+    <div className="flex min-h-screen w-full items-stretch overflow-hidden bg-slate-50 dark:bg-[#07090E] text-slate-800 dark:text-slate-100 transition-colors duration-300">
       
-      {/* Left Column: Form Section (Background is always #FFFFFF) */}
-      <div className="w-full lg:w-[48%] xl:w-[45%] flex flex-col justify-between p-8 md:p-12 lg:p-16 bg-[#FFFFFF]">
+      {/* Left Column: Form Section */}
+      <div className="w-full lg:w-[48%] xl:w-[45%] flex flex-col justify-between p-8 md:p-12 lg:p-16 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800/80">
         
         {/* Brand Header */}
         <div className="flex items-center justify-between w-full">
@@ -189,17 +197,14 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
             className="flex items-center gap-3 cursor-pointer hover:opacity-85 transition-all"
             onClick={onNavigateHome}
           >
-            {/* Icon Wrapper: Background is #E6F4F8, icon/text is #1A365D */}
-            <div className="bg-[#E6F4F8] rounded-xl w-10 h-10 flex items-center justify-center border border-[#A2D9E8]/35 text-[#1A365D] shadow-sm">
+            <div className="bg-gradient-to-br from-[#2B6CB0] to-cyan-500 rounded-xl w-10 h-10 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
               <Store size={20} />
             </div>
             <div>
-              {/* Title: #1A365D */}
-              <h2 className="font-bold text-base leading-tight text-[#1A365D]">
+              <h2 className="font-extrabold text-base leading-tight text-slate-900 dark:text-white">
                 GenieAI
               </h2>
-              {/* Sub: #2B6CB0 */}
-              <span className="text-[10px] font-bold text-[#2B6CB0] tracking-wider uppercase">
+              <span className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 tracking-wider uppercase">
                 {t.aiSaaS}
               </span>
             </div>
@@ -210,7 +215,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
             onClick={() => setLang(lang === 'th' ? 'en' : 'th')}
             size="sm"
             variant="light"
-            className="border border-[#A2D9E8]/30 hover:bg-[#E6F4F8] text-[#1A365D] font-bold rounded-lg cursor-pointer h-8 px-2.5 min-w-0"
+            className="border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold rounded-lg cursor-pointer h-8 px-2.5 min-w-0"
           >
             {lang === 'th' ? 'EN' : 'TH'}
           </Button>
@@ -218,110 +223,111 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
 
         {/* Form Content Area */}
         <div className="my-auto py-8 max-w-[420px] w-full mx-auto">
-          {/* Login / Sign Up State (store info is now collected in the onboarding wizard) */}
+          {/* Login / Sign Up State */}
           <div className="animate-fade-in text-left">
-              {/* Header: #1A365D */}
-              <h1 className="text-4xl font-extrabold text-[#1A365D] tracking-tight mb-2">
+              <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-2">
                 {activeTab === 'login' ? t.welcomeBack : t.createAccount}
               </h1>
-              {/* Description: #2B6CB0 */}
-              <p className="text-sm text-[#2B6CB0]/90 mb-8 leading-relaxed">
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-8 leading-relaxed font-medium">
                 {activeTab === 'login' ? t.loginSub : t.signupSub}
               </p>
 
               {error && (
-                /* Red Accent Color #E53E3E for errors */
-                <div className="bg-[#E53E3E]/10 border border-[#E53E3E]/20 text-[#E53E3E] rounded-xl p-3 text-sm mb-5 font-semibold">
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl p-3 text-sm mb-5 font-semibold">
                   {error}
                 </div>
               )}
 
-              {/* Google Button Container (loads official GSI iframe) */}
+              {/* Google Button Container */}
               <div className="w-full flex flex-col gap-2">
                 <div ref={googleBtnRef} className="w-full min-h-[44px] flex justify-center"></div>
-                <button
-                  type="button"
-                  onClick={() => handleGoogleLoginResponse({ credential: 'mock' })}
-                  className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-[#2B6CB0] transition-colors cursor-pointer text-center block mt-1"
-                >
-                  {t.mockLoginNotice}
-                </button>
+                {mockLoginEnabled && (
+                  <Button
+                    type="button"
+                    variant="light"
+                    size="sm"
+                    onClick={() => handleGoogleLoginResponse({ credential: 'mock' })}
+                    className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400"
+                  >
+                    {t.mockLoginNotice}
+                  </Button>
+                )}
               </div>
 
-              {/* Separator: Lines border #1A365D/10, text #2B6CB0 */}
+              {/* Separator */}
               <div className="flex items-center text-center my-6">
-                <div className="flex-1 border-t border-[#1A365D]/10"></div>
-                <span className="px-4 text-[10px] font-bold text-[#2B6CB0] uppercase tracking-widest">
+                <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
+                <span className="px-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
                   {activeTab === 'login' ? t.orEmailLogin : t.orEmailSignup}
                 </span>
-                <div className="flex-1 border-t border-[#1A365D]/10"></div>
+                <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
               </div>
 
               {/* Form inputs */}
               <form onSubmit={handleCredentialsSubmit} className="flex flex-col gap-4">
-                <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-xs font-semibold text-[#1A365D]">
-                    {t.emailLabel}
-                  </label>
-                  <div className="flex w-full items-stretch rounded-xl border border-[#1A365D]/20 overflow-hidden bg-[#FFFFFF] focus-within:border-[#2B6CB0] transition-colors">
-                    <div className="bg-[#E6F4F8] px-3.5 flex items-center justify-center text-[#1A365D] border-r border-[#1A365D]/10">
-                      <Mail className="shrink-0" size={16} />
-                    </div>
-                    <input
-                      type="email"
+                <TextField isRequired name="email" type="email" className="w-full">
+                  <Label>{t.emailLabel}</Label>
+                  <InputGroup>
+                    <InputGroup.Prefix>
+                      <Mail className="text-slate-500" size={16} />
+                    </InputGroup.Prefix>
+                    <InputGroup.Input
                       placeholder="owner@yourshop.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      required
-                      className="flex-1 h-11 px-3 text-sm text-[#1A365D] placeholder:text-slate-400 bg-[#FFFFFF] outline-none"
+                      autoComplete="email"
                     />
-                  </div>
-                </div>
+                  </InputGroup>
+                </TextField>
 
-                <div className="flex flex-col gap-1.5 w-full">
-                  <label className="text-xs font-semibold text-[#1A365D]">
-                    {t.passwordLabel}
-                  </label>
-                  <div className="flex w-full items-stretch rounded-xl border border-[#1A365D]/20 overflow-hidden bg-[#FFFFFF] focus-within:border-[#2B6CB0] transition-colors">
-                    <div className="bg-[#E6F4F8] px-3.5 flex items-center justify-center text-[#1A365D] border-r border-[#1A365D]/10">
-                      <Lock className="shrink-0" size={16} />
-                    </div>
-                    <input
-                      type="password"
+                <TextField isRequired name="password" type="password" className="w-full">
+                  <Label>{t.passwordLabel}</Label>
+                  <InputGroup>
+                    <InputGroup.Prefix>
+                      <Lock className="text-slate-500" size={16} />
+                    </InputGroup.Prefix>
+                    <InputGroup.Input
                       placeholder={t.passwordPlaceholder}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      required
                       autoComplete={activeTab === 'login' ? 'current-password' : 'new-password'}
-                      className="flex-1 h-11 px-3 text-sm text-[#1A365D] placeholder:text-slate-400 bg-[#FFFFFF] outline-none"
                     />
-                  </div>
-                </div>
+                  </InputGroup>
+                </TextField>
 
                 {activeTab === 'login' && (
-                  <div className="flex items-center justify-between mt-1 text-xs">
-                    {/* Checkbox accent: #2B6CB0, text #1A365D */}
-                    <label className="flex items-center gap-2 text-[#1A365D]/80 font-medium cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={keepLoggedIn}
-                        onChange={(e) => setKeepLoggedIn(e.target.checked)}
-                        className="w-4 h-4 rounded border-[#1A365D]/20 accent-[#2B6CB0] cursor-pointer"
-                      />
-                      <span>{t.keepLoggedIn}</span>
-                    </label>
-                    {/* Link: #2B6CB0 */}
-                    <a href="#forgot" className="text-[#2B6CB0] hover:underline font-bold">
+                  <>
+                    <div className="flex items-center justify-between mt-1 text-xs">
+                      <Checkbox
+                        isSelected={keepLoggedIn}
+                        onChange={setKeepLoggedIn}
+                        size="sm"
+                        className="text-slate-600 dark:text-slate-300"
+                      >
+                        {t.keepLoggedIn}
+                      </Checkbox>
+                      <Button
+                        type="button"
+                        variant="light"
+                        size="sm"
+                        onClick={() => setShowForgotHelp((shown) => !shown)}
+                        className="text-cyan-600 dark:text-cyan-400 font-bold px-2 min-w-0"
+                      >
                       {t.forgotPassword}
-                    </a>
-                  </div>
+                      </Button>
+                    </div>
+                    {showForgotHelp && (
+                      <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+                        {t.forgotHelp}
+                      </div>
+                    )}
+                  </>
                 )}
 
-                {/* Submit Button: bg #2B6CB0, hover bg #1A365D, text #FFFFFF */}
                 <Button 
                   type="submit" 
                   color="primary" 
-                  className="w-full font-bold h-11 mt-4 rounded-xl cursor-pointer bg-[#2B6CB0] hover:bg-[#1A365D] text-[#FFFFFF] shadow-md hover:scale-[1.01] transition-all flex items-center justify-center gap-2"
+                  className="w-full font-bold h-11 mt-4 rounded-xl cursor-pointer bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:opacity-95 text-white shadow-lg shadow-cyan-500/25 hover:scale-[1.01] transition-all flex items-center justify-center gap-2"
                   isLoading={loading}
                 >
                   <span>{activeTab === 'login' ? t.loginBtn : t.signupBtn}</span>
@@ -329,14 +335,13 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
                 </Button>
               </form>
 
-              {/* Bottom Switch Link: text #1A365D, link #2B6CB0 */}
-              <div className="text-center text-xs text-[#1A365D]/85 mt-8">
+              <div className="text-center text-xs text-slate-600 dark:text-slate-400 mt-8">
                 {activeTab === 'login' ? (
                   <p>
                     {t.noAccount}{' '}
                     <button
                       onClick={() => { setActiveTab('signup'); setError(''); }}
-                      className="text-[#2B6CB0] hover:text-[#1A365D] hover:underline font-bold cursor-pointer"
+                      className="text-cyan-600 dark:text-cyan-400 hover:underline font-bold cursor-pointer"
                     >
                       {t.signupBtn}
                     </button>
@@ -346,7 +351,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
                     {t.haveAccount}{' '}
                     <button
                       onClick={() => { setActiveTab('login'); setError(''); }}
-                      className="text-[#2B6CB0] hover:text-[#1A365D] hover:underline font-bold cursor-pointer"
+                      className="text-cyan-600 dark:text-cyan-400 hover:underline font-bold cursor-pointer"
                     >
                       {t.loginBtn}
                     </button>
@@ -356,86 +361,73 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
           </div>
         </div>
 
-        {/* Footer info: text #1A365D/50 */}
-        <div className="text-left text-[11px] text-[#1A365D]/55 font-medium">
+        <div className="text-left text-[11px] text-slate-500 dark:text-slate-500 font-medium">
           © {new Date().getFullYear()} GenieAI SaaS. All rights reserved.
         </div>
       </div>
 
-      {/* Right Column: Visual Section (Soft Primary Color gradient: from #E6F4F8 to #A2D9E8) */}
-      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 bg-gradient-to-br from-[#E6F4F8] to-[#A2D9E8] border-l border-[#A2D9E8]/30 relative overflow-hidden transition-colors duration-300">
+      {/* Right Column: Visual Section (Clean Glassmorphic Ambient Stage) */}
+      <div className="hidden lg:flex lg:w-[52%] xl:w-[55%] flex-col justify-between p-12 bg-gradient-to-br from-[#E6F4F8] via-[#D8F0F6] to-[#A2D9E8] dark:from-[#0B0F17] dark:via-[#1A2338] dark:to-[#07090E] border-l border-slate-200 dark:border-slate-800 relative overflow-hidden transition-colors duration-300">
         
-        {/* Sleeknote Academy Top Right Block */}
-        <div className="flex flex-col items-end text-right self-end max-w-[280px]">
-          {/* Badge: #1A365D text, icon #2B6CB0 */}
-          <div className="flex items-center gap-2 text-[#1A365D] font-bold text-xs uppercase tracking-wider mb-1">
-            <BookOpen size={14} className="text-[#2B6CB0]" />
+        {/* Ambient Grid Pattern & Light Orbs */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#0000000a_1px,transparent_1px),linear-gradient(to_bottom,#0000000a_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,#ffffff0a_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0a_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[450px] h-[450px] bg-cyan-500/15 rounded-full blur-[120px] pointer-events-none" />
+
+        {/* Sleeknote Academy Top Right Block (Above Background) */}
+        <div className="flex flex-col items-end text-right self-end max-w-[300px] relative z-10 bg-white/80 dark:bg-slate-900/80 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 backdrop-blur-xl shadow-lg">
+          <div className="flex items-center gap-2 text-slate-900 dark:text-white font-bold text-xs uppercase tracking-wider mb-1">
+            <BookOpen size={14} className="text-cyan-600 dark:text-cyan-400" />
             <span>{t.academyTitle}</span>
           </div>
-          {/* Subtext: #1A365D/80 */}
-          <p className="text-[11px] text-[#1A365D]/80 leading-relaxed mb-3 font-medium">
+          <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed mb-3 font-medium">
             {t.academyDesc}
           </p>
-          {/* Outlined Button: border #1A365D, text #1A365D */}
           <a
             href="https://developers.line.biz/en/docs/messaging-api/getting-started/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] font-bold border border-[#1A365D] text-[#1A365D] px-3.5 py-1.5 rounded-lg hover:bg-[#1A365D]/5 transition-all uppercase tracking-wider"
+            className="text-[10px] font-bold border border-slate-800 dark:border-slate-200 text-slate-900 dark:text-white px-3.5 py-1.5 rounded-lg hover:bg-slate-900/10 dark:hover:bg-white/10 transition-all uppercase tracking-wider"
           >
             {t.startAcademy}
           </a>
         </div>
 
-        {/* Vector Cartoon Illustration Container */}
-        <div className="my-auto flex flex-col items-center justify-center relative z-10 w-full max-w-[500px] mx-auto">
+        {/* Floating Glassmorphic Widgets & 3D Interactive Mascot Component */}
+        <div className="my-auto flex flex-col items-center justify-center relative z-10 w-full max-w-[500px] mx-auto py-12">
           
-          {/* Subtle glowing backdrop elements using A2D9E8 / E6F4F8 blends */}
-          <div className="absolute w-[280px] h-[280px] bg-[#A2D9E8]/30 rounded-full blur-3xl -top-12 -left-12 -z-10 animate-pulse"></div>
-          <div className="absolute w-[280px] h-[280px] bg-[#FFFFFF]/40 rounded-full blur-3xl -bottom-12 -right-12 -z-10 animate-pulse"></div>
+          {/* Glowing backdrop Orbs */}
+          <div className="absolute w-[320px] h-[320px] bg-cyan-500/25 rounded-full blur-3xl -top-12 -left-12 -z-10 animate-pulse"></div>
+          <div className="absolute w-[320px] h-[320px] bg-indigo-500/25 rounded-full blur-3xl -bottom-12 -right-12 -z-10 animate-pulse"></div>
 
-          {/* Floating Glassmorphic UI Card details around the vector (Bg is #FFFFFF, text is #1A365D) */}
-          {/* Positioned in front (z-20) and overlapping boundaries */}
-          <div className="absolute top-16 -left-8 md:-left-12 bg-[#FFFFFF]/90 backdrop-blur border border-[#A2D9E8] p-3 rounded-xl shadow-lg flex items-center gap-2.5 animate-bounce z-20" style={{ animationDuration: '6s' }}>
-            <span className="text-xl">🤖</span>
+          {/* Interactive 3D Mascot Avatar */}
+          <Mascot3D size="xl" showBadge={true} />
+
+          {/* Floating Widget 1 */}
+          <div className="absolute top-8 -left-4 md:-left-8 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200 dark:border-slate-700 p-3.5 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce z-20" style={{ animationDuration: '6s' }}>
+            <span className="text-2xl">🤖</span>
             <div className="text-left">
-              <p className="text-[10px] font-bold text-[#1A365D] leading-tight">{lang === 'th' ? 'ผู้ช่วย LINE' : 'LINE Assistant'}</p>
-              {/* Green status accent: #38A169 */}
-              <p className="text-[8px] text-[#38A169] font-bold">{lang === 'th' ? 'พร้อมทำงาน' : 'Online (Active)'}</p>
+              <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight">{lang === 'th' ? 'ผู้ช่วย LINE อัจฉริยะ' : 'Smart LINE Assistant'}</p>
+              <p className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold">{lang === 'th' ? 'พร้อมทำงาน 24 ชั่วโมง' : 'Online 24/7 Active'}</p>
             </div>
           </div>
           
-          <div className="absolute bottom-20 -right-8 md:-right-12 bg-[#FFFFFF]/90 backdrop-blur border border-[#A2D9E8] p-3 rounded-xl shadow-lg flex items-center gap-2.5 animate-bounce z-20" style={{ animationDuration: '8s' }}>
-            <span className="text-xl">📅</span>
+          {/* Floating Widget 2 */}
+          <div className="absolute bottom-8 -right-4 md:-right-8 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200 dark:border-slate-700 p-3.5 rounded-2xl shadow-2xl flex items-center gap-3 animate-bounce z-20" style={{ animationDuration: '8s' }}>
+            <span className="text-2xl">📅</span>
             <div className="text-left">
-              <p className="text-[10px] font-bold text-[#1A365D] leading-tight">{lang === 'th' ? 'จองอัตโนมัติ' : 'Auto Bookings'}</p>
-              {/* Blue accent: #2B6CB0 */}
-              <p className="text-[8px] text-[#2B6CB0] font-bold">{lang === 'th' ? 'ตอบลูกค้าให้เอง' : 'Answers for you'}</p>
+              <p className="text-xs font-bold text-slate-900 dark:text-white leading-tight">{lang === 'th' ? 'จองคิวอัตโนมัติ' : 'Auto Bookings'}</p>
+              <p className="text-[9px] text-cyan-600 dark:text-cyan-400 font-bold">{lang === 'th' ? 'ไม่มีคิวซ้อน 100%' : 'Conflict-Free 100%'}</p>
             </div>
-          </div>
-
-          {/* Floating card wrapper: bg #FFFFFF, border #A2D9E8 */}
-          <div className="relative group max-w-[420px] w-full bg-[#FFFFFF] p-5 rounded-3xl border border-[#A2D9E8]/60 shadow-[0_15px_40px_rgba(26,54,93,0.08)] hover:scale-[1.01] transition-transform duration-500 overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-tr from-[#E6F4F8] to-[#A2D9E8]/20 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            
-            {/* The Image */}
-            <img 
-              src="/genie_login_illustration.png" 
-              alt="Genie AI Digital Assistant Illustration" 
-              className="w-full h-auto rounded-2xl drop-shadow-sm select-none group-hover:scale-[1.02] transition-transform duration-700" 
-            />
           </div>
         </div>
 
-        {/* Feature Copy Highlights */}
-        <div className="text-center md:text-left max-w-[480px]">
-          {/* Title: #1A365D, Icon #2B6CB0 */}
-          <h3 className="text-xl font-bold text-[#1A365D] flex items-center gap-2 justify-center md:justify-start">
-            <Sparkles size={18} className="text-[#2B6CB0] animate-pulse" />
+        {/* Feature Copy Highlights Bottom Bar */}
+        <div className="text-center md:text-left max-w-[500px] relative z-10 bg-white/85 dark:bg-slate-900/85 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 backdrop-blur-xl shadow-xl">
+          <h3 className="text-lg font-extrabold text-slate-900 dark:text-white flex items-center gap-2 justify-center md:justify-start">
+            <Sparkles size={18} className="text-cyan-600 dark:text-cyan-400 animate-pulse" />
             <span>{t.aiSaaS}</span>
           </h3>
-          {/* Subtext: #1A365D/80 */}
-          <p className="text-xs text-[#1A365D]/80 leading-relaxed mt-2 font-medium">
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mt-2 font-medium">
             {t.aiDesc}
           </p>
         </div>

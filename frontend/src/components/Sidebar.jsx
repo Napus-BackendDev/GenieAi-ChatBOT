@@ -1,5 +1,6 @@
-import { LayoutDashboard, CalendarCheck, MessageSquare, LogOut, Store, Settings, HelpCircle, Users, Tag, Grid, MessageCircle, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, CalendarCheck, MessageSquare, LogOut, Settings, HelpCircle, Users, Tag, Grid, MessageCircle, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 import { Button } from '@heroui/react';
+import Mascot3D from './Mascot3D';
 
 const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, setIsCollapsed, hasIntervention, hasUnread }) => {
   const menuNames = {
@@ -65,11 +66,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
       
       {/* Brand Header */}
       <div className={`flex items-center mb-10 px-2 relative ${isCollapsed ? 'justify-center' : 'gap-3 group'}`}>
-        <div className="relative shrink-0">
-          <div className="bg-white/10 rounded-xl w-10 h-10 flex items-center justify-center border border-white/15 text-cyan-400 shadow-sm">
-            <Store size={20} className="text-cyan-400" />
-          </div>
-        </div>
+        <Mascot3D size="sm" showBadge={false} />
         {!isCollapsed && (
           <div className="transition-opacity duration-300 overflow-hidden truncate">
             <h2 className="font-extrabold text-sm leading-tight text-white truncate w-[130px]">
@@ -169,15 +166,19 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
 
         {/* Support button */}
         <Button
-          onClick={() => setActiveTab('sandbox')}
+          onClick={() => setActiveTab('support')}
           variant="light"
           isIconOnly={isCollapsed}
-          className={`${isCollapsed ? 'w-11' : 'w-full'} min-w-0 h-11 rounded-xl text-sm text-white/70 hover:text-white hover:bg-white/10 transition-all duration-300 cursor-pointer group ${
+          className={`${isCollapsed ? 'w-11' : 'w-full'} min-w-0 h-11 rounded-xl text-sm transition-all duration-300 cursor-pointer group ${
             isCollapsed ? "justify-center px-0" : "justify-start gap-4 px-4"
+          } ${
+            activeTab === 'support'
+              ? "bg-[#2B6CB0] text-white font-bold shadow-md shadow-[#2B6CB0]/20"
+              : "text-white/70 hover:text-white hover:bg-white/10"
           }`}
           title={isCollapsed ? menuNames.support : ""}
         >
-          <HelpCircle size={18} className="text-white/50 group-hover:text-cyan-400 transition-colors" />
+          <HelpCircle size={18} className={`${activeTab === 'support' ? "text-white" : "text-white/50 group-hover:text-cyan-400"} transition-colors`} />
           {!isCollapsed && <span>{menuNames.support}</span>}
         </Button>
 

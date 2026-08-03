@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   TrendingUp, DollarSign, Users, CalendarCheck, Bot,
   ArrowUpRight, ArrowDownRight, Sparkles, Clock, UserCheck, MessageSquare
@@ -268,7 +268,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
   }, [priceMap]);
 
   // Returns the matched service price, or null when it falls back to avgPrice
-  const exactPriceFor = (topic) => {
+  const exactPriceFor = useCallback((topic) => {
     if (!topic) return null;
     const key = topic.trim().toLowerCase();
     if (priceMap[key]) return priceMap[key];
@@ -277,12 +277,12 @@ const AnalyticsPage = ({ tenantId, lang }) => {
       if (price > 0 && (key.includes(name) || name.includes(key))) return price;
     }
     return null;
-  };
+  }, [priceMap]);
 
-  const priceFor = (topic) => {
+  const priceFor = useCallback((topic) => {
     const matched = exactPriceFor(topic);
     return matched === null ? avgPrice : matched;
-  };
+  }, [avgPrice, exactPriceFor]);
 
   const periodDays = timeframe === '7d' ? 7 : timeframe === '30d' ? 30 : 365;
 
@@ -297,12 +297,12 @@ const AnalyticsPage = ({ tenantId, lang }) => {
   const curBookings = useMemo(() => inWindow(bookings, periodDays * 86400000, 0), [bookings, periodDays]);
   const prevBookings = useMemo(() => inWindow(bookings, periodDays * 2 * 86400000, periodDays * 86400000), [bookings, periodDays]);
 
-  const revenue = useMemo(() => curBookings.reduce((sum, b) => sum + priceFor(b.service_topic), 0), [curBookings]);
-  const prevRevenue = useMemo(() => prevBookings.reduce((sum, b) => sum + priceFor(b.service_topic), 0), [prevBookings]);
+  const revenue = useMemo(() => curBookings.reduce((sum, b) => sum + priceFor(b.service_topic), 0), [curBookings, priceFor]);
+  const prevRevenue = useMemo(() => prevBookings.reduce((sum, b) => sum + priceFor(b.service_topic), 0), [prevBookings, priceFor]);
   // Revenue is an estimate when any booking's price fell back to avgPrice (no matching service price)
   const revenueIsEstimate = useMemo(
     () => curBookings.some((b) => exactPriceFor(b.service_topic) === null),
-    [curBookings, priceMap]
+    [curBookings, exactPriceFor]
   );
   const uniqueCustomers = useMemo(() => new Set(curBookings.map((b) => b.phone_number)).size, [curBookings]);
 
@@ -334,7 +334,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
       }
     }
     return out;
-  }, [bookings, timeframe, lang]);
+  }, [bookings, timeframe, t.days, t.months]);
 
   // Top services (within current window)
   const topServices = useMemo(() => {
@@ -365,7 +365,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
     const counts = [0, 0, 0, 0, 0, 0, 0];
     curBookings.forEach((b) => { counts[new Date(b.booking_datetime).getDay()]++; });
     return counts.map((count, i) => ({ label: t.days[i], count }));
-  }, [curBookings, lang]);
+  }, [curBookings, t.days]);
 
   const resolutionRate = chat.total > 0 ? Math.round(((chat.total - chat.escalated) / chat.total) * 100) : 0;
 
@@ -377,7 +377,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
     });
     return Object.entries(rev).sort((a, b) => b[1] - a[1]).slice(0, 5)
       .map(([name, amount], i) => ({ name, amount, color: PALETTE[i % PALETTE.length] }));
-  }, [curBookings, lang]);
+  }, [curBookings, lang, priceFor]);
 
   const bookingChange = pctChange(curBookings.length, prevBookings.length);
   const revenueChange = pctChange(revenue, prevRevenue);

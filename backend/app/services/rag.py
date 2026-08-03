@@ -4,6 +4,7 @@ import hashlib
 import logging
 import threading
 import chromadb
+from chromadb.config import Settings as ChromaSettings
 from app.core.config import settings
 from app.services.openai_service import get_embedding
 
@@ -21,7 +22,15 @@ def get_chroma_client():
     if chroma_client is None:
         os.makedirs(settings.CHROMA_DB_PATH, exist_ok=True)
         logger.info(f"Initializing persistent ChromaDB client at {settings.CHROMA_DB_PATH}")
-        chroma_client = chromadb.PersistentClient(path=settings.CHROMA_DB_PATH)
+        chroma_client = chromadb.PersistentClient(
+            path=settings.CHROMA_DB_PATH,
+            settings=ChromaSettings(
+                anonymized_telemetry=False,
+                chroma_product_telemetry_impl=(
+                    "app.core.chroma.NoopProductTelemetry"
+                ),
+            ),
+        )
     return chroma_client
 
 def get_knowledge_collection():

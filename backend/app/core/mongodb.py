@@ -59,7 +59,12 @@ async def _ensure_indexes(db) -> None:
             [("tenant_id", 1), ("updated_at", -1)], name="tenant_recent"
         )
         # Fast reverse lookup for Facebook webhook routing (page_id -> tenant).
-        await db.tenant_profiles.create_index("facebook_page_id", name="fb_page_lookup")
+        await db.tenant_profiles.create_index(
+            "facebook_page_id",
+            unique=True,
+            name="uniq_fb_page_id",
+            partialFilterExpression={"facebook_page_id": {"$gt": ""}},
+        )
         await db.documents.create_index("tenant_id", name="idx_tenant_id")
         await db.documents.create_index(
             [("tenant_id", 1), ("content_hash", 1)],
@@ -71,6 +76,8 @@ async def _ensure_indexes(db) -> None:
         await db.bookings.create_index("booking_datetime", name="idx_booking_datetime")
     except Exception as e:
         logger.warning(f"Could not ensure indexes: {e}")
+        if settings.is_production:
+            raise
 
 
 def get_mongo_db():
@@ -80,6 +87,16 @@ def get_mongo_db():
 
 def is_mongo_connected() -> bool:
     return _mongo_db is not None
+
+
+async def ping_mongo() -> bool:
+    if _mongo_client is None:
+        return False
+    try:
+        await _mongo_client.admin.command("ping")
+        return True
+    except Exception:
+        return False
 
 
 async def close_mongo() -> None:

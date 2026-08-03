@@ -1,5 +1,18 @@
 # GenieAI System Architecture & Specification Document
 
+> **Production contract (2026-07-30):** This block supersedes older prototype
+> notes below. Production startup is fail-closed: MongoDB and Redis must be
+> reachable; local JSON fallback, mock login, tokenless tenant routing, and
+> access-token exposure must be disabled. Admin authentication uses bcrypt and
+> a signed JWT in an HttpOnly Secure cookie. Admin and public web-chat tokens
+> use different secrets, audiences, and purposes. LINE webhooks use
+> `/api/webhooks/line/{tenant_id}`; Facebook resolves the tenant from Page ID.
+> `/health/live` reports process liveness and `/health/ready` checks required
+> dependencies. The supported production topology is the Docker/nginx stack in
+> `docker-compose.prod.yml`, or an equivalent HTTPS deployment following
+> `docs/DEPLOYMENT.md`. Embedded ChromaDB requires one backend replica and
+> persistent storage.
+
 GenieAI คือระบบผู้ช่วยธุรกิจอัจฉริยะแบบ Multi-tenant SaaS สำหรับผู้ประกอบการ (เช่น ร้านสปา ร้านทำผม คลินิก หรือร้านอาหาร) โดยระบบจะรับคู่มือการให้บริการ (PDF/TXT/MD) มาประมวลผลเพื่อสร้าง AI Chatbot ตอบคำถามลูกค้าและทำรายการจองนัดหมายโดยอัตโนมัติผ่าน LINE OA รวมถึงช่องทางแชตอื่นๆ พร้อมระบบจัดการคิวนัดหมายและ Live Chat สำหรับแอดมินผู้ควบคุมระบบ
 
 ---

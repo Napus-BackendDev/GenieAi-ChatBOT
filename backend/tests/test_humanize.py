@@ -1,6 +1,7 @@
 """Tests for the AIS-style human reply pacing (LINE typing animation + delays)."""
 import os
 import json
+import asyncio
 
 import pytest
 
@@ -12,6 +13,15 @@ from app.routers.webhooks import (
 )
 
 SLOW = _HUMANIZE_PROFILES["slow"]
+
+
+def _run(coro):
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
 
 
 def test_typing_seconds_respects_min_and_cap():
@@ -37,7 +47,7 @@ def test_slow_is_slower_than_normal():
 
 def test_humanize_mode_defaults_to_slow():
     assert DEFAULT_HUMANIZE_MODE == "slow"
-    assert _load_humanize_mode("nonexistent-tenant-xyz") == "slow"
+    assert _run(_load_humanize_mode("nonexistent-tenant-xyz")) == "slow"
 
 
 @pytest.mark.parametrize("mode", ["slow", "normal", "off"])
@@ -48,7 +58,7 @@ def test_humanize_mode_read_from_profile(mode):
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"company_name": "X", "ai_settings": {"humanize_mode": mode}}, f)
     try:
-        assert _load_humanize_mode(tid) == mode
+        assert _run(_load_humanize_mode(tid)) == mode
     finally:
         os.remove(path)
 
@@ -60,6 +70,6 @@ def test_invalid_humanize_mode_falls_back_to_default():
     with open(path, "w", encoding="utf-8") as f:
         json.dump({"ai_settings": {"humanize_mode": "banana"}}, f)
     try:
-        assert _load_humanize_mode(tid) == "slow"
+        assert _run(_load_humanize_mode(tid)) == "slow"
     finally:
         os.remove(path)
