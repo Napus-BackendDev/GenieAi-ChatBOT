@@ -53,3 +53,11 @@ def test_staff_expertise_is_not_inferred_from_schedule():
     assert "Distinguish expertise questions from schedule questions" in prompt
     assert "Never infer expertise from an on-duty list" in prompt
     assert "only when the customer explicitly asks about a date/day" in prompt
+
+
+def test_service_lists_require_bubbles_and_documented_prices():
+    prompt = build_system_prompt("rag", "")
+    assert "bubble) 1-5 กล่อง" in prompt
+    assert "ห้ามรวมรายการยาวทั้งหมดไว้ในกล่องเดียว" in prompt
+    assert "ต้องแสดงราคาของทุกรายการที่มีราคาระบุไว้" in prompt
+    assert "ห้ามเดาตัวเลขราคา" in prompt
