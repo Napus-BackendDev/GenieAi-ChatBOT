@@ -97,7 +97,7 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
 
         # 4. Extract all profile rules (company details, services, staff, rules, promotions, FAQ) in 1 single call
         # to prevent 429 rate limit errors (from multiple sequential GPT-4o-mini calls).
-        extracted_json = await extract_all_profile_from_text(full_raw_text)
+        extracted_json = await extract_all_profile_from_text(full_raw_text, tenant_id=tenant_id)
 
         # Emit services_done progress with a small delay for smooth frontend UI animations
         await asyncio.sleep(0.5)
@@ -135,7 +135,15 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             "extracted_json": extracted_json,
         })
     except Exception as e:
-        logger.error(f"Error processing upload job {job_id} for {filename}: {e}")
+        from app.services.ai_budget import AIBudgetExceeded
+        if isinstance(e, AIBudgetExceeded):
+            await _write_job_status(tenant_id, job_id, {
+                "status": "blocked_quota",
+                "error_code": "AI_QUOTA_EXCEEDED",
+                "detail": "AI quota is exhausted; retry after the daily reset.",
+            })
+            return
+        logger.error("Error processing upload job: %s", type(e).__name__)
         await _write_job_status(tenant_id, job_id, {
             "status": "error",
             "detail": "ไม่สามารถประมวลผลและจัดทำดัชนีเอกสารได้ กรุณาลองใหม่อีกครั้ง",
@@ -149,12 +157,12 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
             except Exception as e:
                 logger.error(f"Failed to remove temp file {tmp_path} for job {job_id}: {e}")
 
-async def extract_all_profile_from_text(text: str) -> dict:
+async def extract_all_profile_from_text(text: str, tenant_id: str = "default") -> dict:
     """
     Uses a single OpenAI call to extract all structured profile details,
     greatly reducing token consumption and preventing TPM rate limits (429).
     """
-    from app.services.openai_service import openai_client
+    from app.services.openai_service import complete_text
     
     prompt = (
         "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
@@ -205,16 +213,14 @@ async def extract_all_profile_from_text(text: str) -> dict:
     delay = 3.0
     for attempt in range(max_retries):
         try:
-            response = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.0
-            )
-            raw_content = response.choices[0].message.content.strip()
+            raw_content = await complete_text(prompt, tenant_id=tenant_id)
             if raw_content.startswith("```"):
                 raw_content = raw_content.replace("```json", "").replace("```", "").strip()
             return json.loads(raw_content)
         except Exception as e:
+            from app.services.ai_budget import AIBudgetExceeded
+            if isinstance(e, AIBudgetExceeded):
+                raise
             err_str = str(e)
             is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower() or "limit reached" in err_str.lower()
             if is_rate_limit and attempt < max_retries - 1:
@@ -231,16 +237,16 @@ async def extract_all_profile_from_text(text: str) -> dict:
                 await asyncio.sleep(wait)
                 delay = min(delay * 2, 65.0)
                 continue
-            logger.error(f"Failed to extract all profile parts (attempt {attempt + 1}/{max_retries}): {e}")
+            logger.error("Failed to extract all profile parts (attempt %s/%s): %s", attempt + 1, max_retries, type(e).__name__)
             return {}
     return {}
 
-async def extract_business_rules_from_text(text: str) -> dict:
+async def extract_business_rules_from_text(text: str, tenant_id: str = "default") -> dict:
     """
     Uses OpenAI to extract structured services, prices, hours, and business details from raw text,
     including promotions, staff, and FAQs.
     """
-    from app.services.openai_service import openai_client
+    from app.services.openai_service import complete_text
     
     prompt = (
         "คุณคือ AI ผู้เชี่ยวชาญการจัดโครงสร้างข้อมูลธุรกิจ (Structured Data Extractor)\n"
@@ -283,17 +289,15 @@ async def extract_business_rules_from_text(text: str) -> dict:
         f"ข้อความที่ต้องการวิเคราะห์:\n\"\"\"\n{text}\n\"\"\""
     )
     try:
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0
-        )
-        raw_content = response.choices[0].message.content.strip()
+        raw_content = await complete_text(prompt, tenant_id=tenant_id)
         if raw_content.startswith("```"):
             raw_content = raw_content.replace("```json", "").replace("```", "").strip()
         return json.loads(raw_content)
     except Exception as e:
-        logger.error(f"Failed to extract business rules using OpenAI: {e}")
+        from app.services.ai_budget import AIBudgetExceeded
+        if isinstance(e, AIBudgetExceeded):
+            raise
+        logger.error("Failed to extract business rules using provider: %s", type(e).__name__)
         return {
             "company_name": "",
             "business_hours": "",
@@ -459,7 +463,12 @@ async def reextract_schedules(tenant_id: str = Depends(require_tenant)):
     if not text:
         raise HTTPException(status_code=400, detail="No document text found in database for this tenant.")
 
-    extracted = await extract_business_rules_from_text(text)
+    extractor = extract_business_rules_from_text
+    if "tenant_id" in inspect.signature(extractor).parameters:
+        extracted = await extractor(text, tenant_id=tenant_id)
+    else:
+        # Preserve compatibility with older test/plugin hooks that only accept text.
+        extracted = await extractor(text)
     staff_extracted = extracted.get("staff", [])
 
     # Guard the whole read-modify-write with tenant_file_lock so we never race

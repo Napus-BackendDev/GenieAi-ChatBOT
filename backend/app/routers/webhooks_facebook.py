@@ -25,6 +25,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Request, Header, HTTPException, BackgroundTasks
 from fastapi.responses import PlainTextResponse
+from app.core.config import settings
 
 # Reuse the single-source AI pipeline (Ponytail — no re-implementation).
 from app.routers.webhooks_web import generate_ai_bubbles
@@ -88,7 +89,7 @@ def parse_messaging_events(payload: dict) -> list[dict]:
 
 
 async def send_fb_message(recipient_id: str, text: str, page_access_token: str) -> None:
-    """Send a single text message via the Graph Send API (best-effort, never raises)."""
+    """Send a message and raise on delivery failure so the durable inbox retries."""
     params = {"access_token": page_access_token}
     payload = {
         "recipient": {"id": recipient_id},
@@ -99,9 +100,11 @@ async def send_fb_message(recipient_id: str, text: str, page_access_token: str) 
         try:
             resp = await client.post(_fb_graph_send_url(), params=params, json=payload, timeout=10.0)
             if resp.status_code != 200:
-                logger.error(f"Facebook Send API failed: {resp.status_code} {resp.text[:200]}")
-        except Exception as e:
-            logger.error(f"Error calling Facebook Send API: {e}")
+                logger.error("Facebook Send API failed: %s", resp.status_code)
+                raise RuntimeError("FACEBOOK_SEND_FAILED")
+        except httpx.HTTPError as e:
+            logger.error("Error calling Facebook Send API: %s", type(e).__name__)
+            raise RuntimeError("FACEBOOK_SEND_REQUEST_FAILED") from e
 
 
 async def handle_facebook_event(sender_id: str, text: str, tenant_id: str) -> None:
@@ -114,13 +117,17 @@ async def handle_facebook_event(sender_id: str, text: str, tenant_id: str) -> No
             from app.core.db import db_load_profile
             profile = await db_load_profile(tenant_id)
             page_access_token = (profile or {}).get("facebook_page_access_token") or ""
-        except Exception:
-            pass
-        if not page_access_token:
+            if (profile or {}).get("facebook_verified") is not True:
+                logger.warning("Facebook channel is not verified; outbound processing disabled")
+                return
+        except Exception as exc:
+            if settings.is_production:
+                raise RuntimeError("FACEBOOK_PROFILE_UNAVAILABLE") from exc
+            logger.warning("Facebook tenant profile unavailable locally: %s", type(exc).__name__)
+        if not page_access_token and not settings.is_production:
             page_access_token = os.getenv("FB_PAGE_ACCESS_TOKEN") or ""
         if not page_access_token:
-            logger.error(f"No Facebook Page access token for tenant {tenant_id}; cannot send reply.")
-            return
+            raise RuntimeError("FACEBOOK_CHANNEL_NOT_VERIFIED")
 
         result = await generate_ai_bubbles(
             tenant_id=tenant_id,
@@ -135,8 +142,8 @@ async def handle_facebook_event(sender_id: str, text: str, tenant_id: str) -> No
             if bubble:
                 await send_fb_message(sender_id, bubble, page_access_token)
     except Exception as e:
-        import traceback
-        logger.error(f"Unhandled error in handle_facebook_event ({tenant_id}/{sender_id}): {e}\n{traceback.format_exc()}")
+        logger.error("Unhandled error in handle_facebook_event: %s", type(e).__name__)
+        raise
 
 
 @router.get("/facebook")
@@ -192,22 +199,27 @@ async def facebook_webhook(
     # Fall back to the active tenant only when NO page mapping exists at all
     # (single-page/legacy setups) so we never silently misroute a configured page.
     from app.core.db import db_resolve_tenant_by_fb_page_id
+    from app.core.mongodb import is_mongo_connected
+    if settings.is_production and not is_mongo_connected():
+        raise HTTPException(status_code=503, detail="Webhook queue is temporarily unavailable")
 
     for event in parse_messaging_events(payload):
         page_id = event.get("page_id")
         tenant_id = await db_resolve_tenant_by_fb_page_id(page_id)
         if not tenant_id:
-            from app.core.config import settings
-            if not settings.ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS:
-                logger.warning(
-                    f"Facebook page {page_id} is not mapped; event ignored."
-                )
-                continue
-            fallback = await get_active_tenant_id()
-            logger.warning(
-                f"Facebook page {page_id} not mapped to any tenant; falling back to active tenant {fallback}."
+            logger.warning("Facebook page %s is not mapped; event quarantined.", page_id)
+            continue
+        if is_mongo_connected():
+            from app.services.webhook_queue import enqueue_webhook_event
+            await enqueue_webhook_event(
+                "facebook",
+                tenant_id,
+                event.get("message_id"),
+                {"sender_id": event["sender_id"], "text": event["text"]},
             )
-            tenant_id = fallback
+            continue
+        if settings.is_production:
+            raise HTTPException(status_code=503, detail="Webhook queue is temporarily unavailable")
         from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
         event_id = event.get("message_id")
         if not await claim_webhook_event(

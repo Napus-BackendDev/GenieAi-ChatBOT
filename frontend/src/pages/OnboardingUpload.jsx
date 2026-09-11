@@ -59,6 +59,7 @@ const TR = {
     fileTooBig: 'ไฟล์ใหญ่เกินไป (เกิน 15MB) กรุณาเลือกไฟล์ที่เล็กกว่านี้',
     fileWrongType: 'รองรับเฉพาะไฟล์ PDF, TXT หรือ MD เท่านั้น',
     uploadFailed: 'อัปโหลดไม่สำเร็จ',
+    aiQuotaExceeded: 'โควตา AI ของร้านครบแล้ว ระบบจะลองใหม่ได้หลังรีเซ็ตโควตารายวัน',
     retry: 'ลองอีกครั้ง',
     // step 3 connect
     connectSkip: 'ข้ามไปก่อน',
@@ -169,6 +170,7 @@ const TR = {
     fileTooBig: 'File is too large (over 15MB). Please choose a smaller file.',
     fileWrongType: 'Only PDF, TXT or MD files are supported.',
     uploadFailed: 'Upload failed',
+    aiQuotaExceeded: 'This shop has reached its AI quota. Try again after the daily reset.',
     retry: 'Try again',
     connectSkip: 'Skip for now',
     connectNote: 'You can skip this and connect later from the Settings page.',
@@ -259,6 +261,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const [showRaw, setShowRaw] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
   const [showAutoFillBanner, setShowAutoFillBanner] = useState(false);
+  const [parseStatus, setParseStatus] = useState('idle');
   const [progressMessage, setProgressMessage] = useState('🤖 AI กำลังอ่านคู่มือของคุณในหลังบ้าน...');
 
   const [lineConfigured, setLineConfigured] = useState(false);
@@ -282,13 +285,13 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         if (p.company_name && !companyName) setCompanyName(p.company_name);
         if (p.contact_number && !contactNumber) setContactNumber(p.contact_number);
         if (p.business_hours) setBusinessHours(p.business_hours);
-        setLineConfigured(!!p.line_configured);
-        setFacebookConfigured(!!p.facebook_configured);
+        setLineConfigured(!!(p.line_enabled ?? p.line_configured));
+        setFacebookConfigured(!!(p.facebook_enabled ?? p.facebook_configured));
       } catch {
         // backend down -> just proceed with empty prefill (no crash)
       }
     })();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId]);
 
@@ -355,6 +358,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     }
     setFileName(files.map((f) => f.name).join(', '));
     setParseError('');
+    setParseStatus('uploading');
     try {
       // Upload every file in parallel and collect ALL job ids. The backend
       // extracts each file's text independently, so topic-split uploads
@@ -364,6 +368,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
       if (!ids.length) throw new Error(t.uploadFailed);
       setJobIds(ids);
       setJobId(ids[0]); // keep the primary id for any single-job references
+      setParseStatus('processing');
       setStep(2); // auto-advance instantly; parsing continues in background
     } catch (err) {
       setError(err.message === t.uploadFailed ? t.uploadFailed : t.netErr);
@@ -414,7 +419,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     if (!jobIds.length) return;
     setParsing(true);
     setParseError('');
-    if (pollRef.current) clearInterval(pollRef.current);
+    setParseStatus('processing');
+    if (pollRef.current) clearTimeout(pollRef.current);
     mergedRef.current = null;
     mergedDoneRef.current = new Set();
     const rawParts = {};
@@ -434,13 +440,17 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
       try {
         const results = await Promise.all(
           jobIds.map((id) =>
-            fetch(`/api/documents/upload/status/${id}`)
-              .then((r) => r.json())
+              fetch(`/api/documents/upload/status/${id}`)
+              .then(async (r) => {
+                if (!r.ok) return { status: 'error' };
+                return r.json();
+              })
               .catch(() => ({ status: 'error' }))
           )
         );
 
         let anyError = false;
+        let anyQuotaBlocked = false;
         let doneCount = 0;
         results.forEach((data, i) => {
           const id = jobIds[i];
@@ -451,8 +461,9 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
               mergedRef.current = mergeExtracted(mergedRef.current, data.extracted_json || {});
               if (data.raw_text) rawParts[id] = data.raw_text;
             }
-          } else if (data.status === 'error') {
+          } else if (data.status === 'error' || data.status === 'blocked_quota') {
             anyError = true;
+            anyQuotaBlocked = anyQuotaBlocked || data.status === 'blocked_quota' || data.error_code === 'AI_QUOTA_EXCEEDED';
           }
         });
 
@@ -460,31 +471,37 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         setProgressMessage(`🤖 AI วิเคราะห์คู่มือแล้ว ${doneCount}/${jobIds.length} ไฟล์...`);
         if (mergedRef.current) applyMerged(mergedRef.current);
 
-        const allTerminal = results.every((d) => d.status === 'done' || d.status === 'error');
+        const allTerminal = results.every((d) => d.status === 'done' || d.status === 'error' || d.status === 'blocked_quota');
         if (allTerminal) {
-          clearInterval(pollRef.current);
+          clearTimeout(pollRef.current);
           pollRef.current = null;
           const merged = mergedRef.current || mergeExtracted(null, {});
           setRawText(Object.values(rawParts).join('\n\n---\n\n'));
           setExtractedData(merged);
-          setShowAutoFillBanner(true);
+          setShowAutoFillBanner(doneCount > 0);
           setParsing(false);
-          if (doneCount === 0 && anyError) setParseError(t.parseFailed);
+          setParseStatus(doneCount === jobIds.length ? 'succeeded' : (doneCount > 0 ? 'partial' : 'failed'));
+          if (anyQuotaBlocked) setParseError(t.aiQuotaExceeded);
+          else if (doneCount === 0 && anyError) setParseError(t.parseFailed);
+          else setParseError('');
+          return;
         }
+        pollRef.current = setTimeout(poll, 2500);
       } catch {
-        clearInterval(pollRef.current);
+        clearTimeout(pollRef.current);
         pollRef.current = null;
         setParsing(false);
+        setParseStatus('failed');
+        setShowAutoFillBanner(false);
         setParseError(t.netErr);
       }
     };
     poll();
-    pollRef.current = setInterval(poll, 2500);
   };
 
   useEffect(() => {
     if (jobIds.length) beginPolling();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobIds]);
 
@@ -599,6 +616,8 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const delBtn = 'w-8 h-8 rounded-lg bg-[#E53E3E]/10 hover:bg-[#E53E3E]/20 text-[#E53E3E] flex items-center justify-center border border-[#E53E3E]/20 transition-colors cursor-pointer shrink-0';
   const emptyCls = 'py-5 text-center text-slate-400 text-xs';
 
+  const partialParse = parseStatus === 'partial';
+
   return (
     <div className="min-h-screen w-full flex bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-200 transition-colors duration-300">
 
@@ -680,13 +699,13 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         )}
 
         {showAutoFillBanner && extractedData && (
-          <div className="mt-5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/30 rounded-2xl p-4 flex items-center justify-between gap-4 text-left animate-fade-in shadow-sm">
+          <div data-parse-status={parseStatus} className={`mt-5 ${partialParse ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200/60 dark:border-amber-800/30' : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200/60 dark:border-emerald-800/30'} border rounded-2xl p-4 flex items-center justify-between gap-4 text-left animate-fade-in shadow-sm`}>
             <div className="flex items-center gap-3">
-              <Sparkles size={18} className="text-emerald-500 shrink-0" />
+              <Sparkles size={18} className={`${partialParse ? 'text-amber-500' : 'text-emerald-500'} shrink-0`} />
               <div>
-                <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-200">✨ AI อ่านคู่มือเสร็จเรียบร้อยแล้ว!</h4>
-                <p className="text-[10px] text-emerald-500/80 mt-0.5">
-                  เราวิเคราะห์พบบริการ {extractedData.services?.length || 0} รายการ และข้อมูลพนักงาน {extractedData.staff?.length || 0} คน...
+                <h4 className={`text-xs font-bold ${partialParse ? 'text-amber-900 dark:text-amber-200' : 'text-emerald-900 dark:text-emerald-200'}`}>{partialParse ? '⚠️ AI อ่านคู่มือได้บางส่วน' : '✨ AI อ่านคู่มือเสร็จเรียบร้อยแล้ว!'}</h4>
+                <p className={`text-[10px] ${partialParse ? 'text-amber-600/80' : 'text-emerald-500/80'} mt-0.5`}>
+                  {partialParse ? 'บางไฟล์อ่านไม่สำเร็จ แต่ข้อมูลที่อ่านได้ยังนำไปตรวจสอบต่อได้' : `เราวิเคราะห์พบบริการ ${extractedData.services?.length || 0} รายการ และข้อมูลพนักงาน ${extractedData.staff?.length || 0} คน...`}
                 </p>
               </div>
             </div>

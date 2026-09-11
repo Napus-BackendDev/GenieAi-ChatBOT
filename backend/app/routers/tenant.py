@@ -5,10 +5,11 @@ import logging
 import threading
 import uuid
 import httpx
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends, Body, Response
 from app.core.config import settings
-from app.core.security import create_webchat_token, require_tenant, get_current_tenant
+from app.core.security import create_webchat_token, require_tenant, get_current_tenant, decode_reauth_token
 from app.core.db import db_load_profile, db_save_profile
 
 logger = logging.getLogger(__name__)
@@ -60,9 +61,9 @@ def _enforce_tenant(tenant_id: str, current_tenant) -> None:
         require_tenant(tenant_id, current_tenant)
 
 class ServiceItem(BaseModel):
-    name: str
-    price: str
-    duration: int = 30  # duration in minutes
+    name: str = Field(..., min_length=1, max_length=200)
+    price: str = Field(default="", max_length=200)
+    duration: int = Field(default=30, ge=5, le=1440)  # duration in minutes
 
 class StaffItem(BaseModel):
     name: str
@@ -91,6 +92,12 @@ class CustomRuleItem(BaseModel):
     category: str
     rule: str
 
+
+class DeletionRequest(BaseModel):
+    reauth_token: str = Field(..., min_length=1, max_length=4096)
+    confirmation: str = Field(..., min_length=1, max_length=200)
+    idempotency_key: str = Field(default="", max_length=100)
+
 class WebchatSettings(BaseModel):
     enabled: bool = True
     theme_color: str = "#2B6CB0"
@@ -98,15 +105,15 @@ class WebchatSettings(BaseModel):
     token_version: int = Field(default=1, ge=1)
 
 class AISettings(BaseModel):
-    model_name: str = "gpt-4o-mini"
-    temperature: float = 0.2
-    cag_token_threshold: int = 15000
+    model_name: str = Field(default="gpt-4o-mini", max_length=100)
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    cag_token_threshold: int = Field(default=15000, ge=100, le=100000)
     # LINE reply pacing: 'slow' (AIS-like human typing, default) | 'normal' | 'off'.
     humanize_mode: str = "slow"
 
 class BookingSettings(BaseModel):
-    conflict_window_mins: int = 30
-    min_lead_time_hours: int = 2
+    conflict_window_mins: int = Field(default=30, ge=1, le=1440)
+    min_lead_time_hours: float = Field(default=2, ge=0, le=720)
 
 class TenantProfile(BaseModel):
     company_name: str = ""
@@ -123,12 +130,15 @@ class TenantProfile(BaseModel):
     line_verified: bool = False
     facebook_page_access_token: str = ""
     facebook_verify_token: str = ""
+    facebook_verified: bool = False
     # The Messenger Page ID this tenant owns — used to route incoming Facebook
     # webhook events (entry.id) to the correct tenant instead of a global default.
     facebook_page_id: str = ""
     webchat_settings: WebchatSettings = WebchatSettings()
     ai_settings: AISettings = AISettings()
     booking_settings: BookingSettings = BookingSettings()
+    timezone: str = "Asia/Bangkok"
+    conversation_retention_days: int = Field(default=90, ge=7, le=365)
     # Explicit "the owner finished the onboarding wizard" flag. This is the sole
     # signal the frontend routes on — never infer completion from company_name,
     # which leaves accounts that have docs but a blank name stuck in an onboarding loop.
@@ -161,15 +171,29 @@ async def get_profile(tenant_id: str = Depends(require_tenant)):
         raise HTTPException(status_code=500, detail="Failed to load tenant profile.")
 
     # Compute configuration booleans from the (still-present) secret values.
-    line_configured = bool(str(data.get("line_channel_access_token") or "").strip() and str(data.get("line_channel_secret") or "").strip())
-    facebook_configured = bool(str(data.get("facebook_page_access_token") or "").strip())
+    line_credentials_present = bool(
+        str(data.get("line_channel_access_token") or "").strip()
+        and str(data.get("line_channel_secret") or "").strip()
+    )
+    line_enabled = bool(
+        data.get("line_verified")
+        and line_credentials_present
+    )
+    facebook_credentials_present = bool(str(data.get("facebook_page_access_token") or "").strip())
+    facebook_enabled = bool(
+        data.get("facebook_verified")
+        and facebook_credentials_present
+        and str(data.get("facebook_page_id") or "").strip()
+    )
 
     # Strip secrets before returning.
     for field in SECRET_FIELDS:
         data.pop(field, None)
 
-    data["line_configured"] = line_configured
-    data["facebook_configured"] = facebook_configured
+    data["line_configured"] = line_credentials_present
+    data["line_enabled"] = line_enabled
+    data["facebook_configured"] = facebook_credentials_present
+    data["facebook_enabled"] = facebook_enabled
     return data
 
 @router.post("/profile/{tenant_id}")
@@ -199,7 +223,7 @@ async def save_profile(
         # because GET no longer returns secrets, so the SettingsPage POSTs ''
         # for them and that must NOT wipe the stored token/secret.
         for field in TenantProfile.model_fields.keys():
-            if field not in explicit_fields:
+            if field not in explicit_fields or field == "facebook_verified":
                 continue
             value = profile_dict[field]
             if field in SECRET_FIELDS and not str(value or "").strip():
@@ -249,30 +273,20 @@ async def upload_tenant_image(
     if ext not in allowed_extensions:
         raise HTTPException(status_code=400, detail="Only images are allowed (.jpg, .jpeg, .png, .webp, .gif)")
         
-    promo_images_dir = os.path.join(
-        settings.STATIC_IMAGES_PATH,
-        tenant_id,
-        "promotions",
-    )
-    os.makedirs(promo_images_dir, exist_ok=True)
-    
-    unique_filename = f"{uuid.uuid4().hex}{ext}"
-    target_path = os.path.join(promo_images_dir, unique_filename)
-    
     total_bytes = 0
     header = b""
+    content = bytearray()
     try:
-        with open(target_path, "wb") as buffer:
-            while chunk := await file.read(1024 * 1024):
-                total_bytes += len(chunk)
-                if total_bytes > settings.MAX_IMAGE_UPLOAD_BYTES:
-                    raise HTTPException(
-                        status_code=413,
-                        detail="Image exceeds the upload size limit.",
-                    )
-                if len(header) < 12:
-                    header = (header + chunk)[:12]
-                await asyncio.to_thread(buffer.write, chunk)
+        while chunk := await file.read(1024 * 1024):
+            total_bytes += len(chunk)
+            if total_bytes > settings.MAX_IMAGE_UPLOAD_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail="Image exceeds the upload size limit.",
+                )
+            content.extend(chunk)
+            if len(header) < 12:
+                header = (header + chunk)[:12]
         detected_ext = _detect_image_extension(header)
         normalized_ext = ".jpg" if ext == ".jpeg" else ext
         if detected_ext != normalized_ext:
@@ -280,22 +294,30 @@ async def upload_tenant_image(
                 status_code=400,
                 detail="Image content does not match its filename.",
             )
+        from app.services.media_storage import store_media
+        stored = await store_media(
+            bytes(content),
+            tenant_id=tenant_id,
+            filename=f"{uuid.uuid4().hex}{ext}",
+            content_type=f"image/{'jpeg' if normalized_ext == '.jpg' else normalized_ext.lstrip('.')}",
+            category="promotions",
+        )
     except HTTPException:
-        if os.path.exists(target_path):
-            await asyncio.to_thread(os.remove, target_path)
         raise
     except Exception as e:
-        logger.error(f"Failed to save uploaded image: {e}")
-        if os.path.exists(target_path):
-            await asyncio.to_thread(os.remove, target_path)
+        logger.error("Failed to save uploaded image: %s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to save uploaded image.")
-        
-    static_url = f"/static/images/{tenant_id}/promotions/{unique_filename}"
-    return {"status": "success", "image_url": static_url}
+
+    return {"status": "success", "image_url": stored["url"]}
 
 
 class VerifyLineRequest(BaseModel):
     access_token: str = ""
+
+
+class VerifyFacebookRequest(BaseModel):
+    access_token: str = ""
+    page_id: str = ""
 
 
 LINE_BOT_INFO_URL = "https://api.line.me/v2/bot/info"
@@ -352,6 +374,39 @@ async def verify_line(
 
     await _save_profile_field(tenant_id, "line_verified", False)
     return {"valid": False, "error": "โทเคนไม่ถูกต้องหรือหมดอายุ"}
+
+
+@router.post("/verify-facebook/{tenant_id}")
+async def verify_facebook(
+    tenant_id: str,
+    body: VerifyFacebookRequest | None = None,
+    current_tenant: str = Depends(get_current_tenant),
+):
+    """Verify the configured Page token and Page ID before enabling Facebook."""
+    _enforce_tenant(tenant_id, current_tenant)
+    _validate_tenant_id(tenant_id)
+    profile = await db_load_profile(tenant_id) or {}
+    access_token = (body.access_token if body else "").strip() or str(profile.get("facebook_page_access_token") or "").strip()
+    page_id = (body.page_id if body else "").strip() or str(profile.get("facebook_page_id") or "").strip()
+    if not access_token or not page_id:
+        await _save_profile_field(tenant_id, "facebook_verified", False)
+        return {"valid": False, "error": "ต้องระบุ Page Access Token และ Page ID"}
+    try:
+        graph_version = os.getenv("FB_GRAPH_API_VERSION", "v21.0")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://graph.facebook.com/{graph_version}/{page_id}",
+                params={"fields": "id", "access_token": access_token},
+                timeout=5.0,
+            )
+        verified = response.status_code == 200 and str((response.json() or {}).get("id")) == page_id
+    except Exception as exc:
+        logger.warning("Facebook credential verification failed: %s", type(exc).__name__)
+        verified = False
+    await _save_profile_field(tenant_id, "facebook_verified", verified)
+    if not verified:
+        return {"valid": False, "error": "Page credential หรือ Page ID ไม่ถูกต้อง"}
+    return {"valid": True, "page_id": page_id}
 
 
 async def _save_profile_field(tenant_id: str, field_name: str, field_value) -> None:
@@ -493,6 +548,8 @@ class SettingsUpdateRequest(BaseModel):
     webchat_settings: WebchatSettings = WebchatSettings()
     ai_settings: AISettings = AISettings()
     booking_settings: BookingSettings = BookingSettings()
+    timezone: str = "Asia/Bangkok"
+    conversation_retention_days: int = Field(default=90, ge=7, le=365)
 
 
 class WebchatConfigResponse(BaseModel):
@@ -508,11 +565,16 @@ class SettingsResponse(BaseModel):
     webchat_settings: WebchatSettings
     ai_settings: AISettings
     booking_settings: BookingSettings
-    line_verified: bool
-    line_configured: bool
-    facebook_configured: bool
-    facebook_page_id: str
-    webchat_config: WebchatConfigResponse
+    line_verified: bool = False
+    line_configured: bool = False
+    line_enabled: bool = False
+    facebook_configured: bool = False
+    facebook_enabled: bool = False
+    facebook_verified: bool = False
+    facebook_page_id: str = ""
+    webchat_config: WebchatConfigResponse | None = None
+    timezone: str = "Asia/Bangkok"
+    conversation_retention_days: int = 90
 
 
 @router.get("/profile/{tenant_id}/settings", response_model=SettingsResponse, status_code=200)
@@ -529,13 +591,26 @@ async def get_settings(
     settings_keys = [
         "company_name", "business_hours", "contact_number", "webhook_domain",
         "webchat_settings", "ai_settings", "booking_settings",
+        "timezone", "conversation_retention_days",
         "line_channel_access_token", "line_channel_secret", "line_verified",
-        "facebook_page_access_token", "facebook_verify_token", "facebook_page_id"
+        "facebook_page_access_token", "facebook_verify_token", "facebook_page_id", "facebook_verified"
     ]
     res = {k: data.get(k) for k in settings_keys}
     
-    res["line_configured"] = bool(str(res.get("line_channel_access_token") or "").strip() and str(res.get("line_channel_secret") or "").strip())
+    res["line_configured"] = bool(
+        str(res.get("line_channel_access_token") or "").strip()
+        and str(res.get("line_channel_secret") or "").strip()
+    )
+    res["line_enabled"] = bool(
+        res.get("line_verified")
+        and res["line_configured"]
+    )
     res["facebook_configured"] = bool(str(res.get("facebook_page_access_token") or "").strip())
+    res["facebook_enabled"] = bool(
+        res.get("facebook_verified")
+        and res["facebook_configured"]
+        and str(res.get("facebook_page_id") or "").strip()
+    )
     res["webchat_config"] = {
         "token": create_webchat_token(
             tenant_id,
@@ -548,6 +623,40 @@ async def get_settings(
         res.pop(field, None)
         
     return SettingsResponse(**res)
+
+
+@router.get("/ai-usage")
+async def get_ai_usage(current_tenant: str = Depends(get_current_tenant)):
+    """Return only this tenant's AI usage; never expose global/other tenants' totals."""
+    day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    next_reset = day_start + timedelta(days=1)
+    day = day_start.strftime("%Y%m%d")
+    from app.core.redis import get_redis
+
+    try:
+        client = get_redis()
+        token_value = await client.get(f"ai:budget:tenant:{current_tenant}:{day}")
+        request_value = await client.get(f"ai:requests:tenant:{current_tenant}:{day}")
+        return {
+            "provider": settings.AI_PROVIDER,
+            "tenant_tokens": int(token_value or 0),
+            "tenant_token_limit": settings.AI_TENANT_DAILY_TOKEN_CAP,
+            "tenant_requests": int(request_value or 0),
+            "tenant_request_limit": settings.AI_TENANT_DAILY_REQUEST_CAP,
+            "reset_at": next_reset.isoformat(),
+        }
+    except Exception as exc:
+        if settings.is_production:
+            raise HTTPException(status_code=503, detail="AI usage is temporarily unavailable") from exc
+        return {
+            "provider": settings.AI_PROVIDER,
+            "tenant_tokens": 0,
+            "tenant_token_limit": settings.AI_TENANT_DAILY_TOKEN_CAP,
+            "tenant_requests": 0,
+            "tenant_request_limit": settings.AI_TENANT_DAILY_REQUEST_CAP,
+            "reset_at": next_reset.isoformat(),
+            "meter_status": "unavailable",
+        }
 
 
 @router.post("/profile/{tenant_id}/settings")
@@ -580,6 +689,8 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
         raw[field] = val
         if field == "line_channel_access_token":
             raw["line_verified"] = False
+        if field in {"facebook_page_access_token", "facebook_page_id"}:
+            raw["facebook_verified"] = False
         
     await db_save_profile(tenant_id, raw)
     
@@ -594,68 +705,66 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
     return {"status": "success", "message": "Settings saved successfully."}
 
 
-@router.delete("/profile/{tenant_id}")
-async def delete_tenant_account(tenant_id: str, current_tenant: str = Depends(get_current_tenant)):
-    """
-    Completely deletes/wipes all data associated with this tenant, including MongoDB/JSON profiles,
-    documents metadata, bookings, static uploaded images, and ChromaDB vector chunks.
-    """
+_used_reauth_tokens: set[str] = set()
+
+
+async def _queue_deletion_request(
+    req,
+    tenant_id: str,
+    current_tenant: str,
+    response: Response,
+):
     _enforce_tenant(tenant_id, current_tenant)
     _validate_tenant_id(tenant_id)
-    
-    import shutil
-    import os
-    from app.core.db import db_delete_tenant_data
-    from app.core.redis import get_redis
-    from app.services.rag import get_chroma_client, CHROMA_COLLECTION_NAME
-    
-    try:
-        # Delete authoritative records first. If MongoDB fails, leave derived
-        # vector/image data intact and report failure instead of a partial wipe.
-        await db_delete_tenant_data(tenant_id)
+    from app.core.db import db_get_user_by_tenant, db_load_profile
 
-        # 1. Delete ChromaDB vector embeddings
-        try:
-            client = get_chroma_client()
-            collection = client.get_or_create_collection(name=CHROMA_COLLECTION_NAME)
-            collection.delete(where={"tenant_id": tenant_id})
-            logger.info(f"Deleted all ChromaDB chunks for tenant '{tenant_id}'")
-        except Exception as e:
-            logger.error(f"Failed to delete ChromaDB collection for tenant '{tenant_id}': {e}")
-            
-        # 2. Delete static files / uploaded images
-        static_dir = os.path.join(settings.STATIC_IMAGES_PATH, tenant_id)
-        if os.path.exists(static_dir):
-            try:
-                shutil.rmtree(static_dir)
-                logger.info(f"Deleted static images directory for tenant {tenant_id}")
-            except Exception as e:
-                logger.error(f"Failed to delete static images directory {static_dir}: {e}")
-                
-        # 3. Delete Redis cache keys (cag context, histories)
-        try:
-            redis_client = get_redis()
-            # Clear profile cache
-            await redis_client.delete(f"tenant_cag_profile:{tenant_id}")
-            
-            # Clear chat histories
-            async for key in redis_client.scan_iter(match=f"chat_history:{tenant_id}:*"):
-                await redis_client.delete(key)
-                
-            # Clear unread badges
-            async for key in redis_client.scan_iter(match=f"unread:{tenant_id}:*"):
-                await redis_client.delete(key)
-                
-            # Clear human intervention flags
-            async for key in redis_client.scan_iter(match=f"human_intervention:{tenant_id}:*"):
-                await redis_client.delete(key)
-                
-            logger.info(f"Cleared all Redis cache states for tenant {tenant_id}")
-        except Exception as e:
-            logger.error(f"Failed to clear Redis keys for tenant {tenant_id}: {e}")
-            
-        return {"status": "success", "message": "Account deleted successfully."}
-        
-    except Exception as e:
-        logger.error(f"Failed to delete account {tenant_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete account.")
+    payload = decode_reauth_token(req.reauth_token, tenant_id)
+    token_id = payload["jti"]
+    try:
+        from app.core.redis import get_redis
+        accepted = await get_redis().set(f"reauth:used:{token_id}", "1", ex=300, nx=True)
+        if not accepted:
+            raise HTTPException(status_code=401, detail="Reauthentication token already used")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if settings.is_production:
+            raise HTTPException(status_code=503, detail="Deletion is temporarily unavailable") from exc
+        if token_id in _used_reauth_tokens:
+            raise HTTPException(status_code=401, detail="Reauthentication token already used")
+        _used_reauth_tokens.add(token_id)
+
+    profile = await db_load_profile(tenant_id) or {}
+    user = await db_get_user_by_tenant(tenant_id)
+    expected_name = (profile.get("company_name") or (user or {}).get("company_name") or "").strip()
+    if not expected_name or req.confirmation.strip() != expected_name:
+        raise HTTPException(status_code=400, detail="Company name confirmation does not match")
+
+    from app.services.account_deletion import queue_tenant_deletion
+    job = await queue_tenant_deletion(tenant_id, req.idempotency_key.strip() or str(uuid.uuid4()))
+    response.delete_cookie(key=settings.SESSION_COOKIE_NAME, path="/")
+    response.delete_cookie(key=settings.CSRF_COOKIE_NAME, path="/")
+    return {"status": "queued", "deletion_id": job["deletion_id"]}
+
+
+@router.post("/deletion-requests", status_code=202)
+async def request_tenant_deletion(
+    req: DeletionRequest,
+    response: Response,
+    current_tenant: str = Depends(get_current_tenant),
+):
+    """Lock tenant immediately; durable worker performs the irreversible purge."""
+    return await _queue_deletion_request(req, current_tenant, current_tenant, response)
+
+
+@router.delete("/profile/{tenant_id}", status_code=202)
+async def delete_tenant_account(
+    tenant_id: str,
+    response: Response,
+    req: DeletionRequest | None = Body(default=None),
+    current_tenant: str = Depends(get_current_tenant),
+):
+    """Backward-compatible route; destructive deletion requires reauthentication."""
+    if req is None:
+        raise HTTPException(status_code=428, detail="Reauthentication and confirmation are required")
+    return await _queue_deletion_request(req, tenant_id, current_tenant, response)

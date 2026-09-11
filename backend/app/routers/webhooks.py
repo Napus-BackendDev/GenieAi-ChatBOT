@@ -181,11 +181,13 @@ async def push_to_line(user_id: str, messages: list[dict], access_token: str = N
         try:
             response = await client.post(LINE_PUSH_URL, json=payload, headers=headers)
             if response.status_code != 200:
-                logger.error(f"Failed to push to LINE. Status: {response.status_code}, Body: {response.text}")
+                logger.error("Failed to push to LINE. Status: %s", response.status_code)
+                raise RuntimeError("LINE_PUSH_FAILED")
             else:
-                logger.info(f"Successfully pushed message to LINE user {user_id}.")
-        except Exception as e:
-            logger.error(f"Error calling LINE Push API: {e}")
+                logger.info("Successfully pushed message to LINE")
+        except httpx.HTTPError as e:
+            logger.error("Error calling LINE Push API: %s", type(e).__name__)
+            raise RuntimeError("LINE_PUSH_REQUEST_FAILED") from e
 
 async def reply_to_line(reply_token: str, messages: list[dict], access_token: str = None, fallback_user_id: str = None) -> None:
     """
@@ -201,18 +203,26 @@ async def reply_to_line(reply_token: str, messages: list[dict], access_token: st
         "messages": messages
     }
 
+    reply_status = None
+    reply_error = None
     async with httpx.AsyncClient() as client:
         try:
             response = await client.post(LINE_REPLY_URL, json=payload, headers=headers)
             if response.status_code == 200:
                 logger.info("Successfully sent reply to LINE.")
                 return
+            reply_status = response.status_code
             logger.warning(f"Reply failed (status {response.status_code}). Trying push message...")
-        except Exception as e:
-            logger.warning(f"Reply error: {e}. Trying push message...")
+        except httpx.HTTPError as e:
+            reply_error = e
+            logger.warning("Reply request failed (%s). Trying push message...", type(e).__name__)
 
     if fallback_user_id:
         await push_to_line(fallback_user_id, messages, access_token=token)
+        return
+    if reply_error is not None:
+        raise RuntimeError("LINE_REPLY_REQUEST_FAILED") from reply_error
+    raise RuntimeError(f"LINE_REPLY_FAILED_{reply_status or 'UNKNOWN'}")
 
 
 async def show_line_loading(user_id: str, seconds: float = 5, access_token: str = None) -> None:
@@ -231,9 +241,9 @@ async def show_line_loading(user_id: str, seconds: float = 5, access_token: str 
         try:
             resp = await client.post(LINE_LOADING_URL, json=payload, headers=headers)
             if resp.status_code not in (200, 202):
-                logger.warning(f"LINE loading animation failed: {resp.status_code} {resp.text[:120]}")
+                logger.warning("LINE loading animation failed: %s", resp.status_code)
         except Exception as e:
-            logger.warning(f"LINE loading animation error: {e}")
+            logger.warning("LINE loading animation error: %s", type(e).__name__)
 
 
 # Per-tenant reply pacing. "slow" mimics AIS's LINE OA — deliberately unhurried,
@@ -276,10 +286,13 @@ async def get_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
         if profile:
             token = profile.get("line_channel_access_token")
             secret = profile.get("line_channel_secret")
-            if token and secret:
+            if token and secret and (profile.get("line_verified") or not settings.is_production):
                 return token, secret
     except Exception as e:
-        logger.error(f"Error loading tenant credentials for {tenant_id}: {e}")
+        logger.error("Error loading tenant credentials for %s: %s", tenant_id, type(e).__name__)
+
+    if settings.is_production:
+        return None, None
     
     # Fallback to default config env values
     return settings.LINE_CHANNEL_ACCESS_TOKEN, settings.LINE_CHANNEL_SECRET
@@ -295,10 +308,10 @@ async def get_strict_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
         if profile:
             token = profile.get("line_channel_access_token")
             secret = profile.get("line_channel_secret")
-            if token and secret:
+            if token and secret and (profile.get("line_verified") or not settings.is_production):
                 return token, secret
     except Exception as e:
-        logger.error(f"Error loading tenant credentials for {tenant_id}: {e}")
+        logger.error("Error loading tenant credentials for %s: %s", tenant_id, type(e).__name__)
     return None, None
 
 async def handle_line_event(event: dict, base_url: str, tenant_id: str = "default") -> None:
@@ -309,8 +322,8 @@ async def handle_line_event(event: dict, base_url: str, tenant_id: str = "defaul
     try:
         await _handle_line_event_inner(event, base_url, tenant_id)
     except Exception as e:
-        import traceback
-        logger.error(f"Unhandled error in handle_line_event for tenant {tenant_id}: {e}\n{traceback.format_exc()}")
+        logger.error("Unhandled error in handle_line_event for tenant %s: %s", tenant_id, type(e).__name__)
+        raise
 
 
 async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = "default") -> None:
@@ -319,6 +332,11 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
     """
     # Retrieve LINE access token for this tenant
     access_token, _ = await get_tenant_line_credentials(tenant_id)
+    if settings.is_production and not access_token:
+        # Do not consume the event as successful when the provider was never
+        # verified/configured. The durable inbox will retry/quarantine it and
+        # the channel remains disabled in the UI.
+        raise RuntimeError("LINE_CHANNEL_NOT_VERIFIED")
 
     event_type = event.get("type")
     if event_type != "message":
@@ -338,7 +356,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
     if not reply_token or not user_id or not user_message:
         return
         
-    logger.info(f"Processing message '{user_message}' from user {user_id}")
+    logger.info("Processing LINE message for tenant/user session")
 
     # Check for active human intervention.
     # NOTE: A customer sending an emoji no longer triggers handoff. Human mode is
@@ -421,8 +439,8 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
         try:
             await redis_client.set(f"human_intervention:{tenant_id}:{user_id}", "1")
             logger.info(f"Flagged session {user_id} for human intervention (AI handoff marker).")
-        except Exception as re:
-            logger.warning(f"Failed to flag session in Redis: {re}")
+        except Exception as redis_error:
+            logger.warning("Failed to flag session in Redis: %s", type(redis_error).__name__)
     
     # 7. Check if response is about promotions → send Flex carousel with images
     promo_keywords = ["โปรโมชัน", "โปรโมท", "โปร", "promotion", "ส่วนลด", "ลดราคา", "โปรพิเศษ"]
@@ -451,7 +469,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
     image_messages = []
     for img_path in images[:2]:
         full_img_url = f"{base_url.rstrip('/')}{img_path}"
-        logger.info(f"Attaching image to LINE reply: {full_img_url}")
+        logger.info("Attaching image to LINE reply")
         image_messages.append({
             "type": "image",
             "originalContentUrl": full_img_url,
@@ -558,6 +576,21 @@ async def line_webhook(
     
     logger.info(f"Routing LINE webhook events to active tenant: {active_tenant_id}")
     for event in events:
+        from app.core.mongodb import is_mongo_connected
+        if is_mongo_connected():
+            from app.services.webhook_queue import enqueue_webhook_event
+            await enqueue_webhook_event(
+                "line",
+                active_tenant_id,
+                event.get("webhookEventId"),
+                {"event": event, "base_url": base_url},
+            )
+            continue
+        if settings.is_production:
+            # A volatile BackgroundTask is not an acceptable production queue.
+            # Make the provider retry instead of acknowledging an event that may
+            # disappear during a restart.
+            raise HTTPException(status_code=503, detail="Webhook queue is temporarily unavailable")
         from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
         event_id = event.get("webhookEventId")
         if not await claim_webhook_event("line", active_tenant_id, event_id):
@@ -612,6 +645,18 @@ async def line_webhook_tenant(
     
     logger.info(f"Routing LINE webhook events to tenant: {tenant_id}")
     for event in events:
+        from app.core.mongodb import is_mongo_connected
+        if is_mongo_connected():
+            from app.services.webhook_queue import enqueue_webhook_event
+            await enqueue_webhook_event(
+                "line",
+                tenant_id,
+                event.get("webhookEventId"),
+                {"event": event, "base_url": base_url},
+            )
+            continue
+        if settings.is_production:
+            raise HTTPException(status_code=503, detail="Webhook queue is temporarily unavailable")
         from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
         event_id = event.get("webhookEventId")
         if not await claim_webhook_event("line", tenant_id, event_id):

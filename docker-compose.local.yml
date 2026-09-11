@@ -1,0 +1,73 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    networks: [genie_internal]
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      ENVIRONMENT: development
+      OPENAI_API_KEY: ""
+      LINE_CHANNEL_ACCESS_TOKEN: ""
+      LINE_CHANNEL_SECRET: ""
+      REDIS_URL: redis://redis:6379/0
+      MONGODB_URI: mongodb://mongo:27017/?replicaSet=rs0
+      MONGODB_DB_NAME: genieai_local
+      AI_PROVIDER: mock
+      VECTOR_STORE: mongo
+      MEDIA_STORAGE: gridfs
+      ALLOW_LOCAL_DATA_FALLBACK: "false"
+      ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS: "true"
+      ALLOW_MOCK_LOGIN: "true"
+      CORS_ORIGINS: http://127.0.0.1:8080,http://localhost:8080
+      TRUSTED_HOSTS: localhost,127.0.0.1,backend
+    expose: ["8000"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    networks: [genie_internal]
+
+  mongo:
+    image: mongo:8.0@sha256:02a0cc7939f5ed38f30f9bc714ef5f682d49baf9350c54acf302ce833087fe8a
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --host mongo:27017 --eval \"try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}).ok }\" | grep -q 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - local_mongo_data:/data/db
+    networks: [genie_internal]
+
+  redis:
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - local_redis_data:/data
+    networks: [genie_internal]
+
+volumes:
+  local_mongo_data:
+  local_redis_data:
+
+networks:
+  genie_internal:
+    internal: true

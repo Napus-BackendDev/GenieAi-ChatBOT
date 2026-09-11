@@ -7,10 +7,15 @@ BUG 3 — negative UTC offset (e.g. -05:00) must not raise a naive/aware compare
 """
 import asyncio
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from app.core.config import settings
 from app.services import booking_service
+
+
+def _tenant_now() -> datetime:
+    return datetime.now(ZoneInfo(settings.DEFAULT_TENANT_TIMEZONE)).replace(tzinfo=None)
 
 
 @pytest.fixture
@@ -62,7 +67,7 @@ def test_concurrent_create_only_one_succeeds(isolated_bookings):
 # --- BUG 2: machine-readable reason codes ----------------------------------------
 
 def test_reason_past_date(isolated_bookings):
-    past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+    past = (_tenant_now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
     res = booking_service.check_booking_availability_sync(past, tenant_id="t1")
     assert res["available"] is False
     assert res["reason"] == "past_date"
@@ -71,7 +76,7 @@ def test_reason_past_date(isolated_bookings):
 
 def test_reason_under_lead_time(isolated_bookings):
     # ~30 min ahead is inside the default 2h lead time.
-    soon = (datetime.now() + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
+    soon = (_tenant_now() + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
     res = booking_service.check_booking_availability_sync(soon, tenant_id="t1")
     assert res["available"] is False
     assert res["reason"] == "under_lead_time"

@@ -5,7 +5,9 @@ import fitz  # PyMuPDF
 import logging
 import base64
 from app.core.config import settings
-from app.services.openai_service import openai_client
+from app.services.openai_service import extract_page_text_with_vision
+from app.core.mongodb import get_mongo_db
+from app.services.media_storage import store_media
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,8 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
     """
     Parses a PDF, TXT, or MD file. For PDFs, renders each page as an image
     and uses GPT-4o-mini Vision to extract high-accuracy text and tables (Visual OCR).
-    Saves extracted images to a public static folder mapped to the tenant.
+    Stores extracted images in GridFS in production and only uses the local
+    tenant-scoped filesystem fallback when Mongo is unavailable.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -50,9 +53,12 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
     logger.info(f"Starting parsing of PDF with GPT-4o-mini Vision OCR: {file_path} for tenant: {tenant_id}")
     doc = fitz.open(file_path)
     
-    # Create static directory for saving extracted images
+    # Production media is stored in GridFS. Filesystem paths remain only for
+    # local mode without Mongo, so a Render disk is not the source of truth.
+    use_gridfs = settings.MEDIA_STORAGE == "gridfs" and get_mongo_db() is not None
     images_dir = os.path.join(settings.STATIC_IMAGES_PATH, tenant_id, document_id)
-    os.makedirs(images_dir, exist_ok=True)
+    if not use_gridfs:
+        os.makedirs(images_dir, exist_ok=True)
     
     total_pages = len(doc)
     if total_pages > settings.MAX_PDF_PAGES:
@@ -83,35 +89,21 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
             # Encode to base64
             base64_image = base64.b64encode(img_bytes).decode("utf-8")
 
-            # Call OpenAI Vision API while the whole page pipeline is bounded.
+            # Call Vision only through the budgeted provider wrapper. Mock/local
+            # mode returns empty text and uses PyMuPDF fallback below.
             logger.info(f"Calling GPT-4o-mini Vision OCR for page {page_number}")
-            response = await openai_client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": (
-                                    "Extract all text, structures, and tables from this document page image.\n"
-                                    "Return the exact text and tables formatted as markdown. Do not add any conversational text "
-                                    "or wrap the response in markdown code block markers. Respond in the native language "
-                                    "of the document (typically Thai or English)."
-                                )
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                temperature=0.0
+            text = await extract_page_text_with_vision(
+                base64_image,
+                tenant_id,
+                (
+                    "Extract all text, structures, and tables from this document page image.\n"
+                    "Return the exact text and tables formatted as markdown. Do not add any conversational text "
+                    "or wrap the response in markdown code block markers. Respond in the native language "
+                    "of the document (typically Thai or English)."
+                ),
             )
-            text = response.choices[0].message.content.strip()
+            if not text:
+                text = page.get_text()
 
             # Clean up markdown code blocks if the model wrapped it anyway
             if text.startswith("```"):
@@ -142,18 +134,27 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
 
                 # Format name: page_X_img_Y.ext
                 image_filename = f"page_{page_number}_img_{img_idx + 1}.{image_ext}"
-                image_filepath = os.path.join(images_dir, image_filename)
-
-                # Write image file locally
-                with open(image_filepath, "wb") as img_file:
-                    img_file.write(image_bytes)
-
-                # Create dynamic static asset URL
-                image_url = f"/static/images/{tenant_id}/{document_id}/{image_filename}"
+                if use_gridfs:
+                    stored = await store_media(
+                        image_bytes,
+                        tenant_id=tenant_id,
+                        filename=image_filename,
+                        content_type=f"image/{'jpeg' if image_ext in {'jpg', 'jpeg'} else image_ext}",
+                        category=document_id,
+                        document_id=document_id,
+                    )
+                    image_url = stored["url"]
+                else:
+                    image_filepath = os.path.join(images_dir, image_filename)
+                    with open(image_filepath, "wb") as img_file:
+                        img_file.write(image_bytes)
+                    image_url = f"/static/images/{tenant_id}/{document_id}/{image_filename}"
                 image_urls.append(image_url)
 
             except Exception as e:
                 logger.warning(f"Failed to extract image xref {xref} on page {page_number}: {e}")
+                if settings.is_production:
+                    raise
                 continue
 
         return {

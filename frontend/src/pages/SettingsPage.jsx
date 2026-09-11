@@ -38,6 +38,10 @@ const translations = {
     fbStep1: "1. เข้าหน้าเมนู <a href='https://developers.facebook.com/' target='_blank' rel='noopener noreferrer' class='text-[#2B6CB0] dark:text-cyan-400 hover:underline font-bold'>Facebook Developer Portal</a> เลือกแอพของคุณ",
     fbStep2: "2. เพิ่มผลิตภัณฑ์ Messenger และไปที่ส่วนการตั้งค่า Webhooks เพื่อกด Subscribe แชท",
     fbStep3: "3. นำ Webhook URL ด้านล่างและค่า Verify Token ที่กำหนดไปกรอกตรวจสอบฝั่ง Facebook",
+    fbTestBtn: "ตรวจสอบ Page credential",
+    fbTesting: "กำลังตรวจสอบ...",
+    fbTestSuccess: "ตรวจสอบสำเร็จ ✓",
+    fbTestFail: "ตรวจสอบไม่สำเร็จ กรุณาตรวจ token และ Page ID",
     webchatEnable: "เปิดใช้งานช่องทางการแชตบนหน้าเว็บไซต์ (Web Chat Widget)",
     webchatColor: "ธีมสีหลักของกล่องแชต (Accent Color)",
     webchatWelcome: "ข้อความต้อนรับของกล่องแชตแรกเริ่ม",
@@ -93,6 +97,10 @@ const translations = {
     fbStep1: "1. Go to the <a href='https://developers.facebook.com/' target='_blank' rel='noopener noreferrer' class='text-[#2B6CB0] dark:text-cyan-400 hover:underline font-bold'>Facebook Developer Portal</a> for your app.",
     fbStep2: "2. Add the Messenger product to your app and set up Webhooks.",
     fbStep3: "3. Copy the Webhook URL below and enter your configured Verify Token.",
+    fbTestBtn: "Verify Page credential",
+    fbTesting: "Verifying...",
+    fbTestSuccess: "Verified ✓",
+    fbTestFail: "Verification failed. Check the token and Page ID.",
     webchatEnable: "Enable Webchat Widget on Website",
     webchatColor: "Webchat Widget Accent Color",
     webchatWelcome: "Default Welcome Message",
@@ -133,6 +141,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
 
   // LINE "test connection" result state.
   const [lineTest, setLineTest] = useState({ testing: false, result: null }); // result: { valid, bot_name?, picture_url?, error? }
+  const [facebookTest, setFacebookTest] = useState({ testing: false, result: null });
 
   const [settings, setSettings] = useState({
     line_channel_access_token: '',
@@ -179,9 +188,9 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
         // GET no longer returns any secret tokens — only *_configured booleans.
         // Never prefill token/secret inputs; keep them empty so the user must
         // re-type only when they want to change something.
-        setLineConfigured(!!data.line_configured);
+        setLineConfigured(!!(data.line_enabled ?? data.line_configured));
         setLineVerified(!!data.line_verified);
-        setFacebookConfigured(!!data.facebook_configured);
+        setFacebookConfigured(!!(data.facebook_enabled ?? data.facebook_configured));
         setWebchatConfig(data.webchat_config || { token: '', script_path: '/static/widget.js' });
         setSettings({
           line_channel_access_token: '',
@@ -233,20 +242,40 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
       : "Are you absolutely sure you want to delete your account and all data? This action is IRREVERSIBLE!"
     );
     if (!confirmWipe) return;
+
+    const password = window.prompt(
+      lang === 'th'
+        ? 'เพื่อความปลอดภัย กรุณากรอกรหัสผ่านปัจจุบันอีกครั้ง'
+        : 'For security, enter your current password again.'
+    );
+    if (!password) return;
     
     setDeleting(true);
     setMessage({ type: '', text: '' });
     
     try {
-      const res = await fetch(`/api/tenant/profile/${tenantId}`, {
-        method: 'DELETE',
+      const reauthRes = await fetch('/api/auth/reauthenticate', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify({ provider: 'credentials', password })
       });
-      
+      const reauth = await reauthRes.json().catch(() => ({}));
+      if (!reauthRes.ok || !reauth.reauth_token) {
+        throw new Error(reauth.detail || (lang === 'th' ? 'ยืนยันตัวตนไม่สำเร็จ' : 'Reauthentication failed'));
+      }
+      const res = await fetch('/api/tenant/deletion-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reauth_token: reauth.reauth_token,
+          confirmation: deleteConfirmText,
+          idempotency_key: crypto.randomUUID()
+        })
+      });
       if (res.ok) {
-        alert(lang === 'th' ? "ลบบัญชีและข้อมูลของคุณเสร็จสิ้นระบบจะทำการออกจากระบบ" : "Account successfully deleted. You will be logged out.");
+        alert(lang === 'th' ? "รับคำขอลบบัญชีแล้ว ระบบล็อกบัญชีทันทีและจะลบข้อมูลเบื้องหลัง" : "Deletion accepted. Your account is locked and data will be purged in the background.");
         if (onLogout) {
           onLogout();
         }
@@ -281,6 +310,26 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
     }
   };
 
+  const verifyFacebook = async () => {
+    setFacebookTest({ testing: true, result: null });
+    try {
+      const res = await fetch(`/api/tenant/verify-facebook/${tenantId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_token: settings.facebook_page_access_token.trim(),
+          page_id: settings.facebook_page_id.trim()
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      setFacebookTest({ testing: false, result: data });
+      if (!data.valid) setFacebookConfigured(false);
+    } catch {
+      setFacebookTest({ testing: false, result: { valid: false, error: t.fbTestFail } });
+      setFacebookConfigured(false);
+    }
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -308,6 +357,9 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
         // instant feedback whether the token actually works.
         if (typedLineToken || activeSubTab === 'line') {
           verifyLine(typedLineToken || undefined);
+        }
+        if (activeSubTab === 'facebook') {
+          verifyFacebook();
         }
       } else {
         const data = await res.json().catch(() => ({}));
@@ -607,6 +659,18 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                         placeholder={lang === 'en' ? 'e.g. 1234567890 — routes messages to this shop' : 'เช่น 1234567890 — ใช้ส่งข้อความเข้าร้านที่ถูกต้อง'}
                         className="w-full h-10 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]"
                       />
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      <Button type="button" onPress={verifyFacebook} isDisabled={facebookTest.testing} className="self-start bg-[#2B6CB0] text-white font-bold text-xs rounded-xl px-4 h-10">
+                        {facebookTest.testing ? t.fbTesting : t.fbTestBtn}
+                      </Button>
+                      {facebookTest.result && (
+                        <div className={`flex items-center gap-2.5 p-3 rounded-xl border ${facebookTest.result.valid ? 'bg-[#38A169]/10 border-[#38A169]/25 text-[#38A169]' : 'bg-danger/10 border-danger/20 text-danger'}`}>
+                          {facebookTest.result.valid ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+                          <span className="text-xs font-bold">{facebookTest.result.valid ? t.fbTestSuccess : (facebookTest.result.error || t.fbTestFail)}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

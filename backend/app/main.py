@@ -1,11 +1,14 @@
 import os
 import logging
 import uuid
+import asyncio
+import secrets
+import hmac
 from contextlib import asynccontextmanager
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -14,7 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import settings
 from app.core.redis import init_redis, close_redis
 from app.core.mongodb import init_mongo, close_mongo, is_mongo_connected, ping_mongo
-from app.routers import webhooks, documents, bookings, auth, tenant, chat
+from app.core.security import extract_request_token, decode_admin_token
+from app.core.db import db_get_user_by_tenant
+from app.routers import webhooks, documents, bookings, auth, tenant, chat, media
 from app.routers import webhooks_facebook, webhooks_web
 
 # Ensure directories exist before mounting static folder
@@ -60,9 +65,38 @@ async def lifespan(app: FastAPI):
     if settings.is_production and not is_mongo_connected():
         raise RuntimeError("MongoDB is required in production")
 
+    deletion_stop = asyncio.Event()
+    deletion_worker = None
+    webhook_stop = asyncio.Event()
+    webhook_worker = None
+    if settings.DELETION_WORKER_ENABLED:
+        from app.services.account_deletion import run_deletion_worker
+        deletion_worker = asyncio.create_task(run_deletion_worker(deletion_stop))
+    if settings.WEBHOOK_WORKER_ENABLED and is_mongo_connected():
+        from app.services.webhook_queue import run_webhook_worker
+        webhook_worker = asyncio.create_task(run_webhook_worker(webhook_stop))
+    app.state.deletion_stop = deletion_stop
+    app.state.deletion_worker = deletion_worker
+    app.state.webhook_stop = webhook_stop
+    app.state.webhook_worker = webhook_worker
+
     yield
 
-    # 4. Clean up connections on shutdown
+    # 4. Stop durable workers before closing their database connections.
+    deletion_stop.set()
+    webhook_stop.set()
+    if deletion_worker:
+        try:
+            await asyncio.wait_for(deletion_worker, timeout=5)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            deletion_worker.cancel()
+    if webhook_worker:
+        try:
+            await asyncio.wait_for(webhook_worker, timeout=5)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            webhook_worker.cancel()
+
+    # 5. Clean up connections on shutdown
     logger.info("Shutting down FastAPI application...")
     await close_redis()
     await close_mongo()
@@ -86,9 +120,101 @@ app.add_middleware(
     allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", settings.CSRF_HEADER_NAME],
 )
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
+
+
+@app.middleware("http")
+async def csrf_protection(request: Request, call_next):
+    """Protect cookie-authenticated state changes with double-submit CSRF."""
+    unsafe = request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+    path = request.url.path
+    exempt = (
+        path == "/api/auth/login"
+        or path == "/api/auth/providers"
+        or path.startswith("/api/webhooks/")
+    )
+    session_present = bool(request.cookies.get(settings.SESSION_COOKIE_NAME))
+    if unsafe and session_present and not exempt:
+        cookie_token = request.cookies.get(settings.CSRF_COOKIE_NAME, "")
+        header_token = request.headers.get(settings.CSRF_HEADER_NAME, "")
+        origin = request.headers.get("Origin")
+        fetch_site = request.headers.get("Sec-Fetch-Site", "").lower()
+        origin_ok = not origin or origin in settings.cors_origins
+        fetch_site_ok = fetch_site not in {"cross-site"}
+        valid = bool(
+            cookie_token
+            and header_token
+            and hmac.compare_digest(cookie_token, header_token)
+            and origin_ok
+            and fetch_site_ok
+        )
+        if not valid:
+            if settings.CSRF_ENFORCEMENT == "report":
+                logger.warning("CSRF validation failed in report-only mode: %s", path)
+            else:
+                return JSONResponse(status_code=403, content={"detail": "CSRF_VALIDATION_FAILED"})
+
+    response = await call_next(request)
+    if not request.cookies.get(settings.CSRF_COOKIE_NAME) and not path.startswith("/api/webhooks/"):
+        response.set_cookie(
+            key=settings.CSRF_COOKIE_NAME,
+            value=secrets.token_urlsafe(32),
+            max_age=86400,
+            httponly=False,
+            secure=settings.is_production,
+            samesite=settings.SESSION_COOKIE_SAMESITE,
+            path="/",
+        )
+    return response
+
+
+@app.middleware("http")
+async def auth_state_guard(request: Request, call_next):
+    """Reject revoked, stale, locked, or deleting admin sessions before execution."""
+    path = request.url.path
+    # Logout must remain callable with an expired/stale cookie so the browser
+    # can clear it. Public webhooks use provider signatures instead of admin JWTs.
+    if path not in {"/api/auth/login", "/api/auth/providers", "/api/auth/logout"} and not path.startswith("/api/webhooks/"):
+        try:
+            token = extract_request_token(
+                request.headers.get("Authorization"),
+                request.cookies.get(settings.SESSION_COOKIE_NAME),
+            )
+        except HTTPException:
+            return JSONResponse(status_code=401, content={"detail": "Not authenticated"})
+        if token:
+            try:
+                claims = decode_admin_token(token)
+            except HTTPException:
+                return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+            tenant_id = claims["sub"]
+            jti = claims.get("jti")
+            if jti:
+                try:
+                    from app.core.redis import get_redis
+                    redis_client = get_redis()
+                    if await redis_client.exists(f"auth:revoked:{tenant_id}:{jti}") or await redis_client.exists(f"auth:revoked:{jti}"):
+                        return JSONResponse(status_code=401, content={"detail": "Session revoked"})
+                except Exception:
+                    if settings.is_production:
+                        return JSONResponse(status_code=503, content={"detail": "Authentication is temporarily unavailable."})
+                    logger.warning("Session denylist unavailable in local mode")
+
+                try:
+                    user = await db_get_user_by_tenant(claims["sub"])
+                except Exception:
+                    if settings.is_production:
+                        return JSONResponse(status_code=503, content={"detail": "Authentication is temporarily unavailable."})
+                    user = None
+                expected_version = int(user.get("session_version") or 0) if user else None
+                token_version = int(claims.get("session_version") or 0)
+                if user and (user.get("status", "active") != "active" or token_version != expected_version):
+                    return JSONResponse(status_code=401, content={"detail": "Session is no longer active"})
+                if settings.is_production and not user:
+                    return JSONResponse(status_code=401, content={"detail": "Session is no longer active"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -99,6 +225,9 @@ async def security_headers(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-site"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
     if request.url.path != "/api/webhooks/web/widget":
         response.headers["X-Frame-Options"] = "DENY"
     if request.url.path.startswith("/api/"):
@@ -125,6 +254,7 @@ app.include_router(tenant.router)
 app.include_router(chat.router)
 app.include_router(webhooks_facebook.router)
 app.include_router(webhooks_web.router)
+app.include_router(media.router)
 
 @app.get("/")
 async def root():
@@ -153,15 +283,26 @@ async def health_ready():
         pass
     mongo_ready = await ping_mongo()
     chroma_ready = False
-    try:
-        from app.services.rag import get_chroma_client
+    # In production Mongo is the only supported vector store. Do not even
+    # initialize the legacy Chroma client during readiness checks; this keeps
+    # the vulnerable transitional dependency out of the live request path.
+    if settings.VECTOR_STORE != "mongo" or not settings.is_production:
+        try:
+            from app.services.rag import get_chroma_client
 
-        chroma_ready = bool(get_chroma_client().heartbeat())
-    except Exception:
-        pass
+            chroma_ready = bool(get_chroma_client().heartbeat())
+        except Exception:
+            pass
+    if settings.VECTOR_STORE == "mongo":
+        # Mongo is the authoritative vector store in production. Chroma is an
+        # embedded transitional fallback and must not keep a healthy Mongo
+        # deployment out of readiness (or become a required network service).
+        vector_ready = mongo_ready if settings.is_production else (mongo_ready or chroma_ready)
+    else:
+        vector_ready = chroma_ready
     ready = (
         redis_ready
-        and chroma_ready
+        and vector_ready
         and (mongo_ready or not settings.is_production)
     )
     return JSONResponse(
@@ -171,5 +312,7 @@ async def health_ready():
             "redis": redis_ready,
             "mongodb": mongo_ready,
             "chroma": chroma_ready,
+            "vector_store": settings.VECTOR_STORE,
+            "vector_ready": vector_ready,
         },
     )

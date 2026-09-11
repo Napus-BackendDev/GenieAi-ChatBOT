@@ -139,8 +139,8 @@ async def generate_ai_bubbles(
     if requires_human:
         try:
             await redis_client.set(f"human_intervention:{tenant_id}:{session_id}", "1")
-        except Exception as re:
-            logger.warning(f"Failed to flag session in Redis: {re}")
+        except Exception as redis_error:
+            logger.warning("Failed to flag session in Redis: %s", type(redis_error).__name__)
 
     bubbles = split_to_line_bubbles(ai_response, max_bubbles=max_bubbles)
     return {
@@ -265,7 +265,7 @@ async def web_webhook(req: WebChatRequest, request: Request) -> WebChatResponse:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in web_webhook: {e}")
+        logger.error("Error in web_webhook: %s", type(e).__name__)
         raise HTTPException(status_code=500, detail="Failed to process chat message.")
 
     return WebChatResponse(

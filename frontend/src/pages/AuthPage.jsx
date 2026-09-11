@@ -2,8 +2,32 @@ import { useCallback, useState, useEffect, useRef } from 'react';
 import { Mail, Lock, ArrowRight, Store, Sparkles, BookOpen } from 'lucide-react';
 import { Button, Checkbox, InputGroup, Label, TextField } from '@heroui/react';
 import Mascot3D from '../components/Mascot3D';
+import { parseApiJson } from '../lib/apiResponse';
 
 const mockLoginEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_LOGIN === 'true';
+let googleSdkPromise;
+
+const loadGoogleSdkOnce = () => {
+  if (window.google) return Promise.resolve(window.google);
+  if (googleSdkPromise) return googleSdkPromise;
+  googleSdkPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById('genie-google-identity-sdk');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.google));
+      existing.addEventListener('error', reject);
+      return;
+    }
+    const script = document.createElement('script');
+    script.id = 'genie-google-identity-sdk';
+    script.src = 'https://accounts.google.com/gsi/client';
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(window.google);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return googleSdkPromise;
+};
 
 const translations = {
   th: {
@@ -28,7 +52,8 @@ const translations = {
     startAcademy: "ดูวิธีเริ่มต้นใช้งาน",
     aiSaaS: "ระบบผู้ช่วย AI สำหรับธุรกิจ",
     aiDesc: "ช่วยจัดการคิวจอง บริการ และความรู้ของร้านคุณด้วยผู้ช่วย AI อัจฉริยะ เชื่อมต่อ LINE ได้ในไม่กี่นาที ตอบลูกค้าแทนคุณได้ตลอด 24 ชั่วโมง",
-    mockLoginNotice: "* ตัวเลือกเข้าระบบแบบจำลองสำหรับนักพัฒนา"
+    mockLoginNotice: "* ตัวเลือกเข้าระบบแบบจำลองสำหรับนักพัฒนา",
+    apiUnavailable: "ระบบเข้าสู่ระบบไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่ภายหลังหรือติดต่อผู้ดูแลระบบ"
   },
   en: {
     welcomeBack: "Welcome Back",
@@ -52,7 +77,8 @@ const translations = {
     startAcademy: "See how to get started",
     aiSaaS: "AI-Driven SaaS Assistant",
     aiDesc: "Streamline appointments, services, and store knowledge with a smart AI assistant. Connect LINE in minutes to answer your customers around the clock.",
-    mockLoginNotice: "* developer mock login fallback"
+    mockLoginNotice: "* developer mock login fallback",
+    apiUnavailable: "The sign-in service is temporarily unavailable. Please try again later or contact support."
   }
 };
 
@@ -78,6 +104,31 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
   const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [sdkLoaded, setSdkLoaded] = useState(false);
+  const [googleConfig, setGoogleConfig] = useState(null);
+  const googleInitializedFor = useRef('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/auth/providers', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        const data = await parseApiJson(response, t.apiUnavailable);
+        if (!response.ok) throw new Error(data.detail || t.apiUnavailable);
+        return data;
+      })
+      .then((data) => {
+        if (!cancelled) setGoogleConfig(data?.google?.enabled && data.google.client_id ? data.google : { enabled: false });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGoogleConfig({ enabled: false });
+          setError(t.apiUnavailable);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [t.apiUnavailable]);
 
   const handleCredentialsSubmit = async (e) => {
     e.preventDefault();
@@ -87,7 +138,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           provider: 'credentials',
           email: email.trim(),
@@ -96,7 +147,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         })
       });
 
-      const data = await response.json();
+      const data = await parseApiJson(response, t.apiUnavailable);
       if (!response.ok) {
         throw new Error(data.detail || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
       }
@@ -117,9 +168,12 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
     setLoading(true);
 
     try {
+      if (!googleRes?.credential) {
+        throw new Error('Google did not return a sign-in credential');
+      }
       const response = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ 
           provider: 'google',
           token: googleRes.credential,
@@ -127,7 +181,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         })
       });
 
-      const data = await response.json();
+      const data = await parseApiJson(response, t.apiUnavailable);
       if (!response.ok) {
         throw new Error(data.detail || 'Google Auth Failed');
       }
@@ -141,37 +195,34 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
     } finally {
       setLoading(false);
     }
-  }, [keepLoggedIn, onAuthSuccess]);
+  }, [keepLoggedIn, onAuthSuccess, t.apiUnavailable]);
 
   useEffect(() => {
-    if (window.google) {
-      setSdkLoaded(true);
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      setSdkLoaded(true);
-    };
-    document.body.appendChild(script);
-    return () => {
-      if (document.body.contains(script)) {
-        document.body.removeChild(script);
+    if (!googleConfig?.enabled) return undefined;
+    let cancelled = false;
+    loadGoogleSdkOnce()
+      .then(() => { if (!cancelled) setSdkLoaded(true); })
+      .catch(() => { if (!cancelled) setError('Google Sign-In is temporarily unavailable'); });
+    return () => { cancelled = true; };
+  }, [googleConfig?.enabled]);
+
+  const googleCallbackRef = useRef(handleGoogleLoginResponse);
+  useEffect(() => {
+    googleCallbackRef.current = handleGoogleLoginResponse;
+  }, [handleGoogleLoginResponse]);
+
+  useEffect(() => {
+    if (sdkLoaded && googleConfig?.enabled && window.google && googleConfig.client_id) {
+      if (googleInitializedFor.current !== googleConfig.client_id) {
+        window.google.accounts.id.initialize({
+          client_id: googleConfig.client_id,
+          callback: (response) => googleCallbackRef.current(response),
+        });
+        googleInitializedFor.current = googleConfig.client_id;
       }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (sdkLoaded && window.google) {
-      window.google.accounts.id.initialize({
-        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || '35939223788-p8j1o73lkmikv13uoh8f2bep2cagmd9p.apps.googleusercontent.com',
-        callback: handleGoogleLoginResponse
-      });
 
       if (googleBtnRef.current) {
-        googleBtnRef.current.innerHTML = '';
+        googleBtnRef.current.replaceChildren();
         window.google.accounts.id.renderButton(
           googleBtnRef.current,
           { 
@@ -183,7 +234,7 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         );
       }
     }
-  }, [sdkLoaded, activeTab, handleGoogleLoginResponse]);
+  }, [sdkLoaded, googleConfig, activeTab]);
 
   return (
     <div className="flex min-h-screen w-full items-stretch overflow-hidden bg-slate-50 dark:bg-[#07090E] text-slate-800 dark:text-slate-100 transition-colors duration-300">
@@ -240,7 +291,9 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
 
               {/* Google Button Container */}
               <div className="w-full flex flex-col gap-2">
-                <div ref={googleBtnRef} className="w-full min-h-[44px] flex justify-center"></div>
+                {googleConfig?.enabled && (
+                  <div ref={googleBtnRef} className="w-full min-h-[44px] flex justify-center"></div>
+                )}
                 {mockLoginEnabled && (
                   <Button
                     type="button"

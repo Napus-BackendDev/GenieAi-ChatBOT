@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect, useRef } from 'react';
-import { Sun, Moon, Bell, Search } from 'lucide-react';
+import { Sun, Moon, Bell, Search, Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import { InputGroup } from '@heroui/react';
 
@@ -53,6 +53,9 @@ function App() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const mobileMenuButtonRef = useRef(null);
   const [hasIntervention, setHasIntervention] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
   // Ref (not state) so updating the flagged-session list never re-triggers the
@@ -62,6 +65,25 @@ function App() {
   const [isNewUser, setIsNewUser] = useState(false);
 
   const [notifications, setNotifications] = useState([]);
+
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) setIsMobileSidebarOpen(false);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    document.body.style.overflow = isMobile && isMobileSidebarOpen ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [isMobile, isMobileSidebarOpen]);
+
+  useEffect(() => {
+    if (isMobileSidebarOpen) setIsMobileSidebarOpen(false);
+  }, [activeTab, isMobileSidebarOpen]);
 
   // Poll active chat sessions to detect human intervention requests
   useEffect(() => {
@@ -284,14 +306,32 @@ function App() {
 
   // Restore either a persistent login or this tab's session login.
   useEffect(() => {
-    const savedUser = readAuthValue('genie_ai_user');
-    if (savedUser) {
-      const parsedUser = reconcileTenant(JSON.parse(savedUser));
-      setUser(parsedUser);
-      checkUserOnboardingStatus(parsedUser);
-    } else {
-      setLoading(false);
-    }
+    let cancelled = false;
+    const restoreSession = async () => {
+      const savedUser = readAuthValue('genie_ai_user');
+      let cachedUser = null;
+      try {
+        cachedUser = savedUser ? reconcileTenant(JSON.parse(savedUser)) : null;
+      } catch {
+        clearAuth();
+      }
+
+      const serverUser = await fetchJsonSafe('/api/auth/session', null);
+      if (cancelled) return;
+      const currentUser = serverUser?.tenant_id ? serverUser : null;
+      if (currentUser) {
+        setUser(currentUser);
+        checkUserOnboardingStatus(currentUser);
+      } else if (cachedUser && readAuthValue('genie_ai_user')) {
+        // A legacy local-only session is not trusted for routing. Remove it.
+        clearAuth();
+        setLoading(false);
+      } else {
+        setLoading(false);
+      }
+    };
+    restoreSession();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -438,7 +478,7 @@ function App() {
   return (
     <div 
       className="admin-layout text-foreground bg-white dark:bg-slate-950 transition-all duration-300"
-      style={{ gridTemplateColumns: isSidebarCollapsed ? '80px 1fr' : '260px 1fr' }}
+      style={{ gridTemplateColumns: isMobile ? '1fr' : (isSidebarCollapsed ? '80px 1fr' : '260px 1fr') }}
     >
       <Sidebar
         activeTab={activeTab}
@@ -450,6 +490,10 @@ function App() {
         setIsCollapsed={setIsSidebarCollapsed}
         hasIntervention={hasIntervention}
         hasUnread={hasUnread}
+        isMobile={isMobile}
+        isMobileOpen={isMobileSidebarOpen}
+        onMobileClose={() => setIsMobileSidebarOpen(false)}
+        mobileMenuButtonRef={mobileMenuButtonRef}
       />
 
 
@@ -458,6 +502,19 @@ function App() {
         
         {/* Top Header Bar */}
         <header className="top-bar bg-white dark:bg-slate-900 border-[#A2D9E8]/20 dark:border-white/5">
+          {isMobile && (
+            <button
+              type="button"
+              aria-label={lang === 'th' ? 'เปิดเมนู' : 'Open menu'}
+              aria-controls="admin-sidebar"
+              aria-expanded={isMobileSidebarOpen}
+              ref={mobileMenuButtonRef}
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="inline-flex items-center justify-center w-11 h-11 rounded-xl text-[#1A365D] dark:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <Menu size={20} />
+            </button>
+          )}
           {/* Left: Page Title */}
           <h1 className="text-xl font-extrabold text-[#1A365D] dark:text-white">
             {tabNames[activeTab] || 'Dashboard'}

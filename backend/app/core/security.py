@@ -94,7 +94,7 @@ def verify_password(pw: str, hashed: str) -> bool:
 # JWT access tokens
 # ---------------------------------------------------------------------------
 
-def create_access_token(tenant_id: str, email: str) -> str:
+def create_access_token(tenant_id: str, email: str, session_version: int = 0) -> str:
     """Issue a signed JWT whose `sub` claim is the caller's tenant_id."""
     now = datetime.now(timezone.utc)
     payload = {
@@ -103,6 +103,9 @@ def create_access_token(tenant_id: str, email: str) -> str:
         "iss": _TOKEN_ISSUER,
         "aud": _ADMIN_AUDIENCE,
         "purpose": "admin",
+        "jti": secrets.token_urlsafe(24),
+        "session_version": int(session_version or 0),
+        "auth_time": int(now.timestamp()),
         "iat": now,
         "exp": now + timedelta(days=settings.JWT_EXPIRE_DAYS),
     }
@@ -110,6 +113,7 @@ def create_access_token(tenant_id: str, email: str) -> str:
 
 
 _WEBCHAT_AUDIENCE = "genieai-webchat"
+_MEDIA_AUDIENCE = "genieai-media"
 
 
 def create_webchat_token(tenant_id: str, version: int = 1) -> str:
@@ -152,6 +156,106 @@ def verify_webchat_token(token: str) -> str:
     return decode_webchat_token(token)["sub"]
 
 
+def create_media_token(media_id: str, tenant_id: str, expires_seconds: int = 3600) -> str:
+    """Create a short-lived token for an opaque, tenant-owned media URL."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": tenant_id,
+        "media_id": media_id,
+        "iss": _TOKEN_ISSUER,
+        "aud": _MEDIA_AUDIENCE,
+        "purpose": "media",
+        "iat": now,
+        "exp": now + timedelta(seconds=max(60, min(expires_seconds, 86400))),
+    }
+    return jwt.encode(payload, _WEBCHAT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_media_token(token: str, media_id: str) -> dict:
+    try:
+        payload = jwt.decode(
+            token,
+            _WEBCHAT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience=_MEDIA_AUDIENCE,
+            issuer=_TOKEN_ISSUER,
+            options={"require": ["sub", "media_id", "iss", "aud", "purpose", "iat", "exp"]},
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid media token") from exc
+    if payload.get("purpose") != "media" or payload.get("media_id") != media_id:
+        raise HTTPException(status_code=401, detail="Invalid media token")
+    return payload
+
+
+def extract_request_token(
+    authorization: Optional[str] = None,
+    session_cookie: Optional[str] = None,
+) -> str | None:
+    """Extract bearer/cookie token without trusting either source."""
+    if authorization:
+        parts = authorization.split(" ", 1)
+        if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return parts[1].strip()
+    if isinstance(session_cookie, str) and session_cookie.strip():
+        return session_cookie.strip()
+    return None
+
+
+def decode_admin_token(token: str) -> dict:
+    """Decode an admin token for dependency and middleware state checks."""
+    try:
+        payload = jwt.decode(
+            token,
+            _SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience=_ADMIN_AUDIENCE,
+            issuer=_TOKEN_ISSUER,
+            options={"require": [
+                "sub", "iss", "aud", "purpose", "jti", "session_version", "auth_time", "iat", "exp"
+            ]},
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    tenant_id = payload.get("sub")
+    if payload.get("purpose") != "admin" or not isinstance(tenant_id, str) or not tenant_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload
+
+
+def create_reauth_token(tenant_id: str) -> str:
+    """Issue a one-time, five-minute destructive-action authorization token."""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": tenant_id,
+        "iss": _TOKEN_ISSUER,
+        "aud": "genieai-reauth",
+        "purpose": "reauth",
+        "jti": secrets.token_urlsafe(24),
+        "iat": now,
+        "exp": now + timedelta(minutes=5),
+    }
+    return jwt.encode(payload, _SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_reauth_token(token: str, tenant_id: str) -> dict:
+    try:
+        payload = jwt.decode(
+            token,
+            _SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            audience="genieai-reauth",
+            issuer=_TOKEN_ISSUER,
+            options={"require": ["sub", "iss", "aud", "purpose", "jti", "iat", "exp"]},
+        )
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Reauthentication required")
+    if payload.get("purpose") != "reauth" or payload.get("sub") != tenant_id:
+        raise HTTPException(status_code=403, detail="Invalid reauthentication scope")
+    return payload
+
+
 def get_current_tenant(
     authorization: Optional[str] = Header(None),
     session_cookie: Optional[str] = Cookie(None, alias=settings.SESSION_COOKIE_NAME),
@@ -162,34 +266,17 @@ def get_current_tenant(
     header, wrong scheme, or a token that fails signature/expiry verification.
     Returns the `sub` claim (the tenant_id).
     """
-    token = None
-    if authorization:
-        parts = authorization.split(" ", 1)
-        if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        token = parts[1].strip()
-    elif isinstance(session_cookie, str) and session_cookie:
-        token = session_cookie
+    token = extract_request_token(authorization, session_cookie)
 
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     try:
-        payload = jwt.decode(
-            token,
-            _SECRET,
-            algorithms=[settings.JWT_ALGORITHM],
-            audience=_ADMIN_AUDIENCE,
-            issuer=_TOKEN_ISSUER,
-            options={"require": ["sub", "iss", "aud", "purpose", "iat", "exp"]},
-        )
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        payload = decode_admin_token(token)
+    except HTTPException:
+        raise
 
-    tenant_id = payload.get("sub")
-    if payload.get("purpose") != "admin" or not tenant_id:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return tenant_id
+    return payload["sub"]
 
 
 def require_tenant(tenant_id: str, current_tenant: str = Depends(get_current_tenant)) -> str:

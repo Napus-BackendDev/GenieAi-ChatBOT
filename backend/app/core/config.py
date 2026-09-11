@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
     SESSION_COOKIE_NAME: str = "genieai_session"
+    CSRF_COOKIE_NAME: str = "genieai_csrf"
+    CSRF_HEADER_NAME: str = "X-CSRF-Token"
+    CSRF_ENFORCEMENT: Literal["report", "enforce"] = "enforce"
     SESSION_COOKIE_SAMESITE: Literal["lax", "strict", "none"] = "lax"
     EXPOSE_ACCESS_TOKEN: bool = True
 
@@ -33,6 +36,28 @@ class Settings(BaseSettings):
     ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS: bool = True
     ALLOW_LOCAL_DATA_FALLBACK: bool = True
 
+    # AI is enabled by default, but every provider call must reserve against
+    # these hard token/request budgets first. Production fails closed when a
+    # budget cannot be measured.
+    AI_PROVIDER: Literal["disabled", "openai", "mock"] = "openai"
+    AI_GLOBAL_DAILY_TOKEN_CAP: int = 1_000_000
+    AI_TENANT_DAILY_TOKEN_CAP: int = 100_000
+    AI_TENANT_DAILY_REQUEST_CAP: int = 500
+    AI_MAX_OUTPUT_TOKENS: int = 600
+    AI_MAX_OCR_OUTPUT_TOKENS_PER_PAGE: int = 2_000
+    AI_MAX_EMBEDDING_INPUT_TOKENS: int = 8_000
+    AI_MAX_TOOL_ITERATIONS: int = 6
+    AI_ALLOWED_MODELS: str = "gpt-4o-mini,text-embedding-3-small"
+
+    # Retention is explicit and bounded so a tenant cannot accidentally retain
+    # unbounded conversation documents.
+    CONVERSATION_RETENTION_DAYS: int = 90
+    MIN_CONVERSATION_RETENTION_DAYS: int = 7
+    MAX_CONVERSATION_RETENTION_DAYS: int = 365
+    DEFAULT_TENANT_TIMEZONE: str = "Asia/Bangkok"
+    WEBHOOK_WORKER_ENABLED: bool = True
+    DELETION_WORKER_ENABLED: bool = True
+
     # MongoDB (optional; migration in progress). Leave MONGODB_URI blank to keep
     # using local JSON storage. Set it (in .env) to enable the MongoDB connection.
     MONGODB_URI: str = ""
@@ -40,9 +65,14 @@ class Settings(BaseSettings):
 
     # Storage settings (paths relative to project root backend/)
     CHROMA_DB_PATH: str = "data/chroma"
+    VECTOR_STORE: Literal["mongo", "chroma"] = "mongo"
+    VECTOR_SHADOW_READ: bool = False
+    MAX_KNOWLEDGE_CHUNKS_PER_TENANT: int = 2_000
     DOCUMENTS_JSON_PATH: str = "data/documents.json"
     BOOKINGS_JSON_PATH: str = "data/bookings.json"
+    DELETION_JOBS_JSON_PATH: str = "data/deletion_jobs.json"
     STATIC_IMAGES_PATH: str = "static/images"
+    MEDIA_STORAGE: Literal["gridfs", "filesystem"] = "gridfs"
     MAX_UPLOAD_BYTES: int = 15 * 1024 * 1024
     MAX_IMAGE_UPLOAD_BYTES: int = 5 * 1024 * 1024
     MAX_PDF_PAGES: int = 100
@@ -50,6 +80,7 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:5173"
     TRUSTED_HOSTS: str = "localhost,127.0.0.1,testserver,test"
+    RENDER_EXTERNAL_HOSTNAME: str = ""
     TRUST_PROXY_HEADERS: bool = False
     TRUSTED_PROXY_NETWORKS: str = (
         "127.0.0.1/32,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
@@ -67,7 +98,11 @@ class Settings(BaseSettings):
 
     @property
     def trusted_hosts(self) -> list[str]:
-        return [value.strip() for value in self.TRUSTED_HOSTS.split(",") if value.strip()]
+        hosts = [value.strip() for value in self.TRUSTED_HOSTS.split(",") if value.strip()]
+        render_host = self.RENDER_EXTERNAL_HOSTNAME.strip()
+        if render_host and render_host not in hosts:
+            hosts.append(render_host)
+        return hosts
 
     @property
     def trusted_proxy_networks(self) -> list[str]:
@@ -99,6 +134,26 @@ class Settings(BaseSettings):
             errors.append("ALLOW_LOCAL_DATA_FALLBACK must be false")
         if self.EXPOSE_ACCESS_TOKEN:
             errors.append("EXPOSE_ACCESS_TOKEN must be false")
+        if self.AI_PROVIDER == "mock":
+            errors.append("AI_PROVIDER must not be mock in production")
+        if self.AI_PROVIDER == "openai" and not self.OPENAI_API_KEY:
+            errors.append("OPENAI_API_KEY is required when AI_PROVIDER is openai")
+        if self.AI_GLOBAL_DAILY_TOKEN_CAP <= 0:
+            errors.append("AI_GLOBAL_DAILY_TOKEN_CAP must be positive")
+        if self.AI_TENANT_DAILY_TOKEN_CAP <= 0:
+            errors.append("AI_TENANT_DAILY_TOKEN_CAP must be positive")
+        if self.AI_TENANT_DAILY_REQUEST_CAP <= 0:
+            errors.append("AI_TENANT_DAILY_REQUEST_CAP must be positive")
+        if self.AI_MAX_OUTPUT_TOKENS <= 0 or self.AI_MAX_TOOL_ITERATIONS <= 0:
+            errors.append("AI output and tool iteration caps must be positive")
+        if self.MAX_KNOWLEDGE_CHUNKS_PER_TENANT <= 0:
+            errors.append("MAX_KNOWLEDGE_CHUNKS_PER_TENANT must be positive")
+        if self.VECTOR_STORE != "mongo":
+            errors.append("VECTOR_STORE must be mongo in production")
+        if self.MEDIA_STORAGE != "gridfs":
+            errors.append("MEDIA_STORAGE must be gridfs in production")
+        if not (7 <= self.MIN_CONVERSATION_RETENTION_DAYS <= self.CONVERSATION_RETENTION_DAYS <= self.MAX_CONVERSATION_RETENTION_DAYS <= 365):
+            errors.append("Conversation retention must be within 7..365 days")
         if self.SESSION_COOKIE_SAMESITE == "none":
             errors.append("SESSION_COOKIE_SAMESITE must be lax or strict")
         if not self.cors_origins:

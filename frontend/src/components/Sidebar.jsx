@@ -1,8 +1,44 @@
+import { useEffect, useRef } from 'react';
 import { LayoutDashboard, CalendarCheck, MessageSquare, LogOut, Settings, HelpCircle, Users, Tag, Grid, MessageCircle, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 import { Button } from '@heroui/react';
 import Mascot3D from './Mascot3D';
 
-const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, setIsCollapsed, hasIntervention, hasUnread }) => {
+const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, setIsCollapsed, hasIntervention, hasUnread, isMobile, isMobileOpen, onMobileClose, mobileMenuButtonRef }) => {
+  const sidebarRef = useRef(null);
+  const wasOpenRef = useRef(false);
+
+  useEffect(() => {
+    if (!isMobile) return undefined;
+    if (!isMobileOpen) {
+      if (wasOpenRef.current) {
+        wasOpenRef.current = false;
+        mobileMenuButtonRef?.current?.focus();
+      }
+      return undefined;
+    }
+    wasOpenRef.current = true;
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onMobileClose?.();
+      if (event.key !== 'Tab') return;
+      const focusable = [...(sidebarRef.current?.querySelectorAll(
+        'button:not([disabled]):not([tabindex="-1"]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+      ) || [])];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    const firstFocusable = sidebarRef.current?.querySelector('button:not([tabindex="-1"])');
+    firstFocusable?.focus();
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isMobile, isMobileOpen, onMobileClose, mobileMenuButtonRef]);
   const menuNames = {
     th: {
       overview: 'แดชบอร์ด',
@@ -49,16 +85,34 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
     { id: 'sandbox', name: menuNames.sandbox, icon: MessageSquare },
   ];
 
+  const navigate = (tab) => {
+    setActiveTab(tab);
+    if (isMobile) onMobileClose?.();
+  };
+
   return (
-    <aside 
-      className={`h-screen sticky top-0 flex flex-col bg-gradient-to-b from-[#1A365D] to-[#0F2038] text-white border-none shadow-xl z-20 shrink-0 transition-all duration-300 relative ${
-        isCollapsed ? 'w-20 px-2 py-6' : 'w-[260px] p-6'
-      }`}
+    <>
+      {isMobile && isMobileOpen && (
+        <button
+          type="button"
+          aria-label={lang === 'th' ? 'ปิดเมนู' : 'Close menu'}
+          onClick={onMobileClose}
+          className="fixed inset-0 bg-slate-950/50 z-40 cursor-default"
+        />
+      )}
+    <aside
+      id="admin-sidebar"
+      ref={sidebarRef}
+      aria-label={lang === 'th' ? 'เมนูหลัก' : 'Main menu'}
+      className={`${isMobile ? 'fixed inset-y-0 left-0 w-[280px] p-6 z-50' : `h-screen sticky top-0 ${isCollapsed ? 'w-20 px-2 py-6' : 'w-[260px] p-6'} z-20`} flex flex-col bg-gradient-to-b from-[#1A365D] to-[#0F2038] text-white border-none shadow-xl shrink-0 transition-transform duration-300 relative ${isMobile ? (isMobileOpen ? 'translate-x-0' : '-translate-x-full') : ''}`}
     >
       {/* Floating Toggle Button */}
       <button
         onClick={() => setIsCollapsed(!isCollapsed)}
-        className="absolute -right-3 top-8 bg-[#2B6CB0] hover:bg-[#2b6cb0d0] border border-white/20 rounded-full w-6 h-6 flex items-center justify-center shadow-lg text-white cursor-pointer z-30 transition-transform duration-300 hover:scale-110"
+        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-hidden={isMobile}
+        tabIndex={isMobile ? -1 : 0}
+        className={`${isMobile ? 'hidden' : ''} absolute -right-3 top-8 bg-[#2B6CB0] hover:bg-[#2b6cb0d0] border border-white/20 rounded-full w-6 h-6 flex items-center justify-center shadow-lg text-white cursor-pointer z-30 transition-transform duration-300 hover:scale-110`}
         title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
       >
         {isCollapsed ? <ChevronRight size={12} /> : <ChevronLeft size={12} />}
@@ -88,7 +142,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
           return (
             <Button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => navigate(item.id)}
               variant="light"
               isIconOnly={isCollapsed}
               className={`${isCollapsed ? 'w-11' : 'w-full'} min-w-0 h-11 rounded-xl text-sm transition-all duration-300 relative group cursor-pointer ${
@@ -148,7 +202,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
         
         {/* Settings button */}
         <Button
-          onClick={() => setActiveTab('settings')}
+          onClick={() => navigate('settings')}
           variant="light"
           isIconOnly={isCollapsed}
           className={`${isCollapsed ? 'w-11' : 'w-full'} min-w-0 h-11 rounded-xl text-sm transition-all duration-300 cursor-pointer group ${
@@ -166,7 +220,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
 
         {/* Support button */}
         <Button
-          onClick={() => setActiveTab('support')}
+          onClick={() => navigate('support')}
           variant="light"
           isIconOnly={isCollapsed}
           className={`${isCollapsed ? 'w-11' : 'w-full'} min-w-0 h-11 rounded-xl text-sm transition-all duration-300 cursor-pointer group ${
@@ -198,6 +252,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
       </div>
 
     </aside>
+    </>
   );
 };
 

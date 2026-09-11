@@ -1,0 +1,27 @@
+{
+  "schema": "https://openvex.dev/ns/v0.2.0",
+  "author": "GenieAI Platform/Security",
+  "timestamp": "2026-09-11T00:00:00Z",
+  "statements": [
+    {
+      "vulnerability": "CVE-2026-45830",
+      "product": "pkg:pypi/chromadb@0.4.24",
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Production rejects VECTOR_STORE=chroma and never starts a Chroma HTTP server. The package is retained only for isolated local fallback during the Mongo vector migration.",
+      "action_statement": "Remove chromadb after the dual-read migration gate.",
+      "owner": "Platform/Security",
+      "expires": "2026-09-25T00:00:00Z"
+    },
+    {
+      "vulnerability": "CVE-2026-45833",
+      "product": "pkg:pypi/chromadb@0.4.24",
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Production rejects VECTOR_STORE=chroma, Chroma is not exposed on a network port, and untrusted users cannot access its collection API.",
+      "action_statement": "Remove chromadb after the dual-read migration gate.",
+      "owner": "Platform/Security",
+      "expires": "2026-09-25T00:00:00Z"
+    }
+  ]
+}

@@ -242,3 +242,19 @@ def test_login_credentials_returns_access_token(client, monkeypatch, tmp_path):
         "password": "WRONG",
     })
     assert r3.status_code == 401
+
+
+def test_auth_providers_is_json_and_uses_backend_google_client_id(client, monkeypatch):
+    from app.routers import auth as auth_router
+
+    client_id = "123456789-example.apps.googleusercontent.com"
+    monkeypatch.setattr(auth_router.settings, "GOOGLE_CLIENT_ID", client_id)
+
+    response = client.get("/api/auth/providers")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "google": {"enabled": True, "client_id": client_id}
+    }

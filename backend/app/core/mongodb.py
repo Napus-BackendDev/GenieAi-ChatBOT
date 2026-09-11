@@ -74,6 +74,60 @@ async def _ensure_indexes(db) -> None:
         )
         await db.bookings.create_index("tenant_id", name="idx_tenant_id")
         await db.bookings.create_index("booking_datetime", name="idx_booking_datetime")
+        await db.bookings.create_index(
+            [("tenant_id", 1), ("idempotency_key", 1)],
+            unique=True,
+            name="uniq_booking_idempotency",
+            partialFilterExpression={"idempotency_key": {"$exists": True}},
+        )
+        await db.tenant_deletion_jobs.create_index(
+            [("tenant_id", 1), ("idempotency_key", 1)],
+            unique=True,
+            name="uniq_tenant_deletion_idempotency",
+        )
+        await db.tenant_deletion_jobs.create_index(
+            [("status", 1), ("next_attempt_at", 1), ("created_at", 1)],
+            name="deletion_worker_queue",
+        )
+        await db.tenant_deletion_jobs.create_index(
+            "completed_at",
+            expireAfterSeconds=30 * 24 * 60 * 60,
+            name="deletion_receipt_ttl",
+            partialFilterExpression={"status": "completed"},
+        )
+        await db.webhook_events.create_index(
+            [("channel", 1), ("tenant_id", 1), ("provider_event_id", 1)],
+            unique=True,
+            name="uniq_webhook_event",
+        )
+        await db.webhook_events.create_index(
+            [("status", 1), ("next_attempt_at", 1), ("received_at", 1)],
+            name="webhook_worker_queue",
+        )
+        await db.conversation_messages.create_index(
+            [("tenant_id", 1), ("session_id", 1), ("created_at", 1)],
+            name="conversation_message_timeline",
+        )
+        await db.conversation_messages.create_index(
+            "expires_at", expireAfterSeconds=0, name="conversation_message_retention"
+        )
+        await db.knowledge_chunks.create_index(
+            [("tenant_id", 1), ("document_id", 1), ("chunk_index", 1)],
+            unique=True,
+            name="uniq_knowledge_chunk",
+        )
+        await db.booking_slot_locks.create_index(
+            [("tenant_id", 1), ("staff_name", 1), ("slot_start_utc", 1)],
+            unique=True,
+            name="uniq_booking_slot",
+        )
+        await db["media.files"].create_index(
+            "metadata.tenant_id", name="media_tenant_lookup"
+        )
+        await db["media.files"].create_index(
+            [("metadata.tenant_id", 1), ("metadata.document_id", 1)],
+            name="media_document_lookup",
+        )
     except Exception as e:
         logger.warning(f"Could not ensure indexes: {e}")
         if settings.is_production:

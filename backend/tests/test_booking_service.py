@@ -2,10 +2,15 @@
 import json
 import os
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from app.core.config import settings
 from app.services import booking_service
+
+
+def _tenant_now() -> datetime:
+    return datetime.now(ZoneInfo(settings.DEFAULT_TENANT_TIMEZONE)).replace(tzinfo=None)
 
 
 @pytest.fixture
@@ -85,7 +90,7 @@ def test_create_rejects_when_slot_taken(isolated_bookings):
 
 def test_rejects_past_datetime(isolated_bookings):
     """A datetime in the past must never be available (regression)."""
-    past = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
+    past = (_tenant_now() - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
     res = booking_service.check_booking_availability_sync(past, tenant_id="t1")
     assert res["available"] is False
     assert "ผ่านมาแล้ว" in res["message"]
@@ -99,10 +104,10 @@ def test_rejects_past_datetime(isolated_bookings):
 
 def test_enforces_default_min_lead_time(isolated_bookings):
     """Default lead time is 2h; a slot 30 min out is rejected, 3h out is fine."""
-    soon = (datetime.now() + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
+    soon = (_tenant_now() + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
     assert booking_service.check_booking_availability_sync(soon, tenant_id="t1")["available"] is False
 
-    later = (datetime.now() + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S")
+    later = (_tenant_now() + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S")
     assert booking_service.check_booking_availability_sync(later, tenant_id="t1")["available"] is True
 
 
@@ -110,10 +115,10 @@ def test_custom_min_lead_time_from_profile(isolated_env):
     """A tenant profile with min_lead_time_hours=24 rejects slots inside 24h."""
     isolated_env("clinic", {"min_lead_time_hours": 24})
 
-    in_12h = (datetime.now() + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%S")
+    in_12h = (_tenant_now() + timedelta(hours=12)).strftime("%Y-%m-%dT%H:%M:%S")
     assert booking_service.check_booking_availability_sync(in_12h, tenant_id="clinic")["available"] is False
 
-    in_30h = (datetime.now() + timedelta(hours=30)).strftime("%Y-%m-%dT%H:%M:%S")
+    in_30h = (_tenant_now() + timedelta(hours=30)).strftime("%Y-%m-%dT%H:%M:%S")
     assert booking_service.check_booking_availability_sync(in_30h, tenant_id="clinic")["available"] is True
 
 
@@ -141,7 +146,7 @@ def test_invalid_profile_settings_fall_back_to_defaults(isolated_env):
     isolated_env("bad", {"conflict_window_mins": -5, "min_lead_time_hours": "nope"})
 
     # Default 2h lead time still enforced despite the garbage min_lead_time_hours.
-    soon = (datetime.now() + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
+    soon = (_tenant_now() + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%S")
     assert booking_service.check_booking_availability_sync(soon, tenant_id="bad")["available"] is False
 
     # Default 30-min conflict window still applies despite the negative override.

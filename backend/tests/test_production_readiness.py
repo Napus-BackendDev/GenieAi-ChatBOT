@@ -51,6 +51,17 @@ def test_valid_production_configuration_passes():
     _production_settings().validate_runtime()
 
 
+def test_render_external_hostname_is_trusted_automatically():
+    configured = _production_settings(
+        TRUSTED_HOSTS="app.example.test",
+        RENDER_EXTERNAL_HOSTNAME="genieai-chatbot.onrender.com",
+    )
+    assert configured.trusted_hosts == [
+        "app.example.test",
+        "genieai-chatbot.onrender.com",
+    ]
+
+
 @pytest.mark.parametrize(
     ("override", "expected"),
     [
