@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 os.environ.update(MONGODB_URI="", REDIS_URL=os.environ.get("E2E_REDIS_URL", "redis://127.0.0.1:6390/0"),
                   ENVIRONMENT="development", ALLOW_LOCAL_DATA_FALLBACK="true", ALLOW_MOCK_LOGIN="false",
                   AI_TENANT_DAILY_TOKEN_CAP="5000000", AI_TENANT_DAILY_REQUEST_CAP="5000")
-WORK = tempfile.mkdtemp(prefix="genie-e2e-")
+WORK = os.environ.get("E2E_WORKDIR") or tempfile.mkdtemp(prefix="genie-e2e-")
+os.makedirs(WORK, exist_ok=True)
 os.chdir(WORK)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 

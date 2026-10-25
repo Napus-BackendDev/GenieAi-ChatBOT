@@ -104,7 +104,7 @@ const Sidebar = ({ activeTab, setActiveTab, user, onLogout, lang, isCollapsed, s
       id="admin-sidebar"
       ref={sidebarRef}
       aria-label={lang === 'th' ? 'เมนูหลัก' : 'Main menu'}
-      className={`${isMobile ? 'fixed inset-y-0 left-0 w-[280px] p-6 z-50' : `h-screen sticky top-0 ${isCollapsed ? 'w-20 px-2 py-6' : 'w-[260px] p-6'} z-20`} flex flex-col bg-gradient-to-b from-[#1A365D] to-[#0F2038] text-white border-none shadow-xl shrink-0 transition-transform duration-300 relative ${isMobile ? (isMobileOpen ? 'translate-x-0' : '-translate-x-full') : ''}`}
+      className={`${isMobile ? 'fixed inset-y-0 left-0 w-[280px] p-6 z-50' : `h-screen sticky top-0 ${isCollapsed ? 'w-20 px-2 py-6' : 'w-[260px] p-6'} z-20`} flex flex-col bg-gradient-to-b from-[#1A365D] to-[#0F2038] text-white border-none shadow-xl shrink-0 transition-transform duration-300 ${isMobile ? (isMobileOpen ? 'translate-x-0' : '-translate-x-full') : ''}`}
     >
       {/* Floating Toggle Button */}
       <button

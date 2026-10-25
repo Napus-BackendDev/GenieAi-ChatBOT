@@ -595,7 +595,8 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
                                 color="danger"
                                 size="sm"
                                 title={t.cancelBtnTooltip}
-                                className="w-6 h-6 min-w-6 rounded-md cursor-pointer hover:bg-danger/10 p-0 shrink-0"
+                                aria-label={t.cancelBtnTooltip}
+                                className="w-9 h-9 min-w-9 sm:w-7 sm:h-7 sm:min-w-7 rounded-md cursor-pointer hover:bg-danger/10 p-0 shrink-0"
                               >
                                 <Trash2 size={13} />
                               </Button>

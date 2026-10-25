@@ -91,8 +91,9 @@ function App() {
   }, [isMobile, isMobileSidebarOpen]);
 
   useEffect(() => {
-    if (isMobileSidebarOpen) setIsMobileSidebarOpen(false);
-  }, [activeTab, isMobileSidebarOpen]);
+    // Close the drawer when the page changes. Depending on isMobileSidebarOpen here would close it the instant it opens.
+    setIsMobileSidebarOpen(false);
+  }, [activeTab]);
 
   // Poll active chat sessions to detect human intervention requests
   useEffect(() => {

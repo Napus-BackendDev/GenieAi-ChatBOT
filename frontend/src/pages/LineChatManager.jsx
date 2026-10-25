@@ -51,6 +51,18 @@ const translations = {
   }
 };
 
+// The API sends an ISO timestamp (or "Active now"); show a short local time instead of the raw string.
+const formatSessionTime = (value, lang) => {
+  if (!value || value === 'Active now') return value;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const sameDay = d.toDateString() === new Date().toDateString();
+  const locale = lang === 'th' ? 'th-TH' : 'en-GB';
+  return sameDay
+    ? d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+};
+
 const LineChatManager = ({ tenantId, lang }) => {
   const t = translations[lang || 'th'];
   const [sessions, setSessions] = useState([]);
@@ -351,7 +363,7 @@ const LineChatManager = ({ tenantId, lang }) => {
                         {session.name}
                       </h4>
                       <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-1">
-                        {session.time}
+                        {formatSessionTime(session.time, lang)}
                       </span>
                     </div>
 
