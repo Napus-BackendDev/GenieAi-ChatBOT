@@ -16,6 +16,8 @@ cd backend
 | `e2e_booking_edit.py` | จอง: สำเร็จ/ชน/อดีต/lead time/แพทย์ไม่เข้า/ข้อมูลผิด/idempotency/8 คนพร้อมกัน/ยกเลิก/แยก tenant; แก้ไขบริการ-พนักงาน-โปร-FAQ-กฎ | 37/37 |
 | `e2e_line_ai.py` | LINE: ราคา/FAQ/โปร/ตารางหมอ/อังกฤษ/นอกเรื่อง/prompt-injection/สติกเกอร์/ข้อความยาว, แก้ราคาแล้วบอทตามทันที, จองผ่านแชต (สำเร็จ/ชนเวลา/วันหมอไม่เข้า), แอดมิน pause/reply/resume, 2 tenants | 30/30 |
 | `e2e_resilience.py` | OpenAI timeout/429/500, โควตาหมด, Redis ล่ม, tenant ถูกล็อก, web chat token ผิด | 19/19 |
+| `e2e_webchat.py` | วิดเจ็ตแชตบนเว็บ: ออก token, ตอบจากข้อมูลร้านตัวเอง, ข้ามร้านไม่ได้, token ผิด/admin ใช้แทนไม่ได้, rate limit | 10/10 |
+| `e2e_load.py` | 20 ลูกค้าทักพร้อมกัน: ตอบครบ, 20 บทสนทนาแยกกัน (~15 วินาที) | 4/4 |
 | `e2e_upload_line.py` | อัปโหลด PDF จริง 4 ไฟล์ (OCR+สกัด), ไฟล์ผิดประเภท/ว่าง/ไบนารี/ไม่ล็อกอิน, บันทึกโปรไฟล์, แชต+LINE | 44/44 (รอบก่อนแก้ extraction) |
 | pytest | unit/integration ทั้งหมดของ backend | ผ่านทั้งหมด |
 | `npm run lint` / `build` | frontend | ผ่าน |

@@ -4,7 +4,7 @@ Runs the real FastAPI app in-process against throw-away data: no Mongo, a local
 Redis on :6390, a temp working dir, real OpenAI (only the suites that need it).
 Start Redis first:  redis-server --port 6390 --save "" --appendonly no
 """
-import os, sys, tempfile, asyncio, time, json, hmac, hashlib, base64
+import os, sys, tempfile, asyncio, time, json, hmac, hashlib, base64, itertools
 from datetime import datetime, timedelta
 
 os.environ.update(MONGODB_URI="", REDIS_URL=os.environ.get("E2E_REDIS_URL", "redis://127.0.0.1:6390/0"),
@@ -22,6 +22,7 @@ import app.routers.webhooks as wh  # noqa: E402
 import app.routers.chat as chat_mod  # noqa: E402
 
 results: list[tuple[str, bool]] = []
+_ids = itertools.count(1)  # time_ns() collides on Windows when called concurrently
 
 
 def check(name, cond, extra=""):
@@ -120,13 +121,13 @@ class Ctx:
             await db_save_profile(tenant, p)
 
     async def line(self, tenant, line, text, uid="Uc1", eid=None, mtype="text"):
-        msg = {"type": mtype, "id": str(time.time_ns())}
+        msg = {"type": mtype, "id": f"m{next(_ids)}"}
         if mtype == "text":
             msg["text"] = text
         else:
             msg.update(packageId="1", stickerId="1")
-        ev = {"type": "message", "mode": "active", "webhookEventId": eid or f"ev-{time.time_ns()}",
-              "replyToken": f"rt-{time.time_ns()}", "source": {"type": "user", "userId": uid},
+        ev = {"type": "message", "mode": "active", "webhookEventId": eid or f"ev-{next(_ids)}-{time.time_ns()}",
+              "replyToken": f"rt-{next(_ids)}", "source": {"type": "user", "userId": uid},
               "timestamp": int(time.time() * 1000), "message": msg}
         b = json.dumps({"destination": line["bot"], "events": [ev]}).encode()
         sig = base64.b64encode(hmac.new(line["secret"].encode(), b, hashlib.sha256).digest()).decode()
