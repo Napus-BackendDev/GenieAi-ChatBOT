@@ -218,13 +218,6 @@ function App() {
     localStorage.setItem('genie_ai_theme', theme);
   }, [theme]);
 
-  // The JWT is the single source of truth for tenant identity: its `sub` claim IS
-  // the tenant_id, and every tenant-scoped endpoint compares the path tenant_id to
-  // the token's (403 on mismatch). Deriving tenant_id from the token — rather than a
-  // possibly-stale stored user object — guarantees they always agree (e.g. after
-  // switching accounts without a full reload).
-  const reconcileTenant = (u) => u;
-
   // Safe JSON fetch: tolerates an empty body or a backend that is briefly down,
   // returning `fallback` instead of throwing, so onboarding routing never crashes.
   const fetchJsonSafe = async (url, fallback) => {
