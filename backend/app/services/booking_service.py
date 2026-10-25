@@ -34,11 +34,9 @@ async def _load_tenant_staff(tenant_id: str) -> list:
 async def _find_staff(tenant_id: str, staff_name: str) -> dict:
     if not staff_name:
         return {}
-    want = staff_name.strip().lower()
     staff = await _load_tenant_staff(tenant_id)
     for s in staff:
-        nm = (s.get("name") or "").strip().lower()
-        if nm and (nm == want or nm in want or want in nm):
+        if _same_staff(s.get("name") or "", staff_name):
             return s
     return {}
 
@@ -114,6 +112,24 @@ def _duration_for_service(profile: dict, service_topic: str) -> int:
                 break
     return 30
 
+_STAFF_TITLE = re.compile(r"^(?:คุณหมอ|ทันตแพทย์หญิง|ทันตแพทย์|หมอ|ทพญ\.?|ทพ\.?|นพ\.?|พญ\.?|dr\.?|คุณ)\s*", re.IGNORECASE)
+
+
+def _staff_core(name: str) -> str:
+    core = (name or "").strip().lower()
+    while True:
+        stripped = _STAFF_TITLE.sub("", core, count=1).strip()
+        if stripped == core:
+            return core
+        core = stripped
+
+
+def _same_staff(a: str, b: str) -> bool:
+    """Staff names reach us from the LLM ("หมอสมชาย") and the profile ("ทพ.สมชาย"); compare without titles."""
+    a, b = _staff_core(a), _staff_core(b)
+    return bool(a and b and (a == b or a in b or b in a))
+
+
 def _find_conflict(
     bookings: list[dict],
     target_dt: datetime,
@@ -129,7 +145,7 @@ def _find_conflict(
         if booking.get("tenant_id") != tenant_id:
             continue
 
-        if staff_name and booking.get("staff_name") and booking.get("staff_name") != staff_name:
+        if staff_name and booking.get("staff_name") and not _same_staff(booking.get("staff_name"), staff_name):
             continue
 
         try:
@@ -252,7 +268,7 @@ async def _consume_availability_token(
         if service_topic and data.get("service_topic") and data.get("service_topic") != service_topic:
             return False, None
         token_staff = data.get("staff_name")
-        if staff_name and token_staff and staff_name.strip() != token_staff:
+        if staff_name and token_staff and not _same_staff(staff_name, token_staff):
             return False, None
         return True, token_staff
     except Exception as exc:
@@ -291,6 +307,8 @@ async def check_booking_availability(
     staff_name = staff_name.strip() if staff_name and staff_name.strip() else None
     if staff_name:
         staff = await _find_staff(tenant_id, staff_name)
+        if staff and staff.get("name"):
+            staff_name = staff["name"]  # canonical profile name, so conflicts/tokens compare the same string
         staff_schedule = staff.get("schedule", "") if staff else ""
         if staff_schedule and sched.parse_schedule(staff_schedule) and not sched.covers_datetime(staff_schedule, target_dt):
             return {

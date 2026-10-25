@@ -11,6 +11,7 @@ from bson.binary import Binary
 from chromadb.config import Settings as ChromaSettings
 from app.core.config import settings
 from app.services.openai_service import get_embedding
+from app.services.ai_budget import AIBudgetExceeded
 from app.core.mongodb import get_mongo_db
 
 logger = logging.getLogger(__name__)
@@ -531,7 +532,13 @@ async def retrieve_hybrid_context(query_text: str, tenant_id: str = "default") -
         logger.error(f"Error in hybrid routing: {e}. Falling back to standard RAG.")
 
     logger.info(f"Tenant '{tenant_id}' is in RAG mode. Querying configured vector store.")
-    rag_result = await query_knowledge_base(query_text, tenant_id=tenant_id, n_results=5)
+    try:
+        rag_result = await query_knowledge_base(query_text, tenant_id=tenant_id, n_results=5)
+    except AIBudgetExceeded:
+        # Embedding quota gone: degrade to profile-only context; the chat step then returns
+        # the friendly quota/handoff message instead of the channel handler crashing silently.
+        logger.warning("RAG skipped for tenant %s: AI budget exceeded", tenant_id)
+        return {"mode": "rag", "context": "", "images": [], "citations": []}
     rag_result["mode"] = "rag"
     return rag_result
 

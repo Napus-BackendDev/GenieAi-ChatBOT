@@ -193,3 +193,14 @@ def test_create_accepts_wellformed_contact(isolated_bookings, good_phone):
         "A", good_phone, "customer@example.com", "service", "2099-02-01T10:00:00", tenant_id="t1"
     )
     assert res["status"] == "success"
+
+
+def test_same_staff_matches_llm_and_profile_names():
+    """Regression: 'หมอสมชาย' (LLM) vs 'ทพ.สมชาย' (profile) must be one doctor, or the slot double-books."""
+    from app.services.booking_service import _same_staff
+    assert _same_staff("หมอสมชาย", "ทพ.สมชาย")
+    assert _same_staff("คุณหมอ สมชาย", "ทพ. สมชาย")
+    assert _same_staff("ทพ.สมชาย", "ทพ.สมชาย")
+    assert _same_staff("สมชาย", "ทพ.สมชาย")
+    assert not _same_staff("ทพ.สมหญิง", "ทพ.สมชาย")
+    assert not _same_staff("", "ทพ.สมชาย")

@@ -52,7 +52,10 @@ const TR = {
     uploadTitle: 'อัปโหลดคู่มือหรือรายการบริการ',
     uploadSub: 'อัปโหลดไฟล์ที่มีรายการบริการ ราคา เวลาทำการ หรือคำถามที่ลูกค้าถามบ่อย แล้ว AI จะอ่านให้เอง',
     dropHere: 'ลากไฟล์มาวางที่นี่ หรือคลิกเพื่อเลือกไฟล์',
-    dropHint: 'รองรับไฟล์ PDF, TXT หรือ MD (ไม่เกิน 15MB)',
+    dropHint: 'รองรับไฟล์ PDF, TXT หรือ MD (ไม่เกิน 15MB) หรือลากทั้งโฟลเดอร์มาวางได้',
+    pickFolder: 'เลือกทั้งโฟลเดอร์',
+    skippedNote: (n) => `ข้ามไฟล์ที่ไม่รองรับหรือใหญ่เกินไป ${n} ไฟล์`,
+    partialFail: (n) => `อัปโหลดไม่สำเร็จ ${n} ไฟล์`,
     tipTitle: 'เคล็ดลับการเตรียมไฟล์',
     tipBody: 'ไฟล์ที่ดีควรมี รายการบริการและราคา เวลาทำการ เงื่อนไขการนัด และคำถามที่ลูกค้าถามบ่อย เพื่อให้ AI ตอบได้ครบถ้วน',
     processingBg: 'กำลังประมวลผลเบื้องหลัง',
@@ -163,7 +166,10 @@ const TR = {
     uploadTitle: 'Upload a manual or service list',
     uploadSub: 'Upload a file with your services, prices, hours, or common questions — the AI will read it for you.',
     dropHere: 'Drag a file here, or click to choose',
-    dropHint: 'Supports PDF, TXT or MD (max 15MB)',
+    dropHint: 'Supports PDF, TXT or MD (max 15MB) — or drop a whole folder',
+    pickFolder: 'Choose a folder',
+    skippedNote: (n) => `Skipped ${n} unsupported or oversized file(s)`,
+    partialFail: (n) => `${n} file(s) failed to upload`,
     tipTitle: 'Tips for preparing your file',
     tipBody: 'A good file includes services and prices, opening hours, booking conditions, and common customer questions so the AI can answer fully.',
     processingBg: 'Processing in the background',
@@ -268,11 +274,13 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const [facebookConfigured, setFacebookConfigured] = useState(false);
   const [completedProfile, setCompletedProfile] = useState(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [saving, setSaving] = useState(false);
   const pollRef = useRef(null);
   const mergedRef = useRef(null);      // accumulated extraction across all files
   const mergedDoneRef = useRef(null);  // set of job ids already merged
   const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
 
   // Prefill from saved profile (company/contact/hours) when returning.
   useEffect(() => {
@@ -348,15 +356,16 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     setError('');
     const files = Array.from(fileList || []).filter(Boolean);
     if (!files.length) return;
-    // Validate every file before uploading any.
-    for (const f of files) {
-      const msg = validateFile(f);
-      if (msg) {
-        setError(msg);
-        return;
-      }
+    // Keep supported files; a folder drop commonly contains images/docx/.DS_Store that must not block the rest.
+    const good = files.filter((f) => !validateFile(f));
+    const skipped = files.length - good.length;
+    if (!good.length) {
+      setError(validateFile(files[0]) || t.fileWrongType);
+      return;
     }
-    setFileName(files.map((f) => f.name).join(', '));
+    if (skipped) setNotice(t.skippedNote(skipped));
+    else setNotice('');
+    setFileName(good.map((f) => f.name).join(', '));
     setParseError('');
     setParseStatus('uploading');
     try {
@@ -364,8 +373,14 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
       // extracts each file's text independently, so topic-split uploads
       // (services / staff / promos in separate PDFs) each contribute their
       // part — the poller below MERGES every job's result into one profile.
-      const ids = (await Promise.all(files.map((f) => uploadOne(f).catch(() => null)))).filter(Boolean);
+      // At most 3 uploads in flight so a big folder cannot flood the server.
+      const results = [];
+      for (let i = 0; i < good.length; i += 3) {
+        results.push(...(await Promise.all(good.slice(i, i + 3).map((f) => uploadOne(f).catch(() => null)))));
+      }
+      const ids = results.filter(Boolean);
       if (!ids.length) throw new Error(t.uploadFailed);
+      if (ids.length < good.length) setNotice((n) => [n, t.partialFail(good.length - ids.length)].filter(Boolean).join(' · '));
       setJobIds(ids);
       setJobId(ids[0]); // keep the primary id for any single-job references
       setParseStatus('processing');
@@ -375,9 +390,31 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
     }
   };
 
-  const onFileDrop = (e) => {
+  // Expand dropped folders (webkitGetAsEntry) into a flat File list; plain files pass through.
+  const collectDropped = async (dt) => {
+    const entries = Array.from(dt.items || []).map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+    if (!entries.some((en) => en.isDirectory)) return Array.from(dt.files || []);
+    const out = [];
+    const walk = async (en) => {
+      if (en.isFile) {
+        out.push(await new Promise((resolve, reject) => en.file(resolve, reject)));
+      } else if (en.isDirectory) {
+        const reader = en.createReader();
+        let batch;
+        do {
+          batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+          for (const child of batch) await walk(child);
+        } while (batch.length);
+      }
+    };
+    for (const en of entries) await walk(en);
+    return out;
+  };
+
+  const onFileDrop = async (e) => {
     e.preventDefault();
-    startUpload(e.dataTransfer.files);
+    const files = await collectDropped(e.dataTransfer).catch(() => Array.from(e.dataTransfer.files || []));
+    startUpload(files);
   };
 
   // Merge one file's extracted_json into the running accumulator.
@@ -738,6 +775,11 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
         {/* Panel container */}
         <div className="my-auto py-8 w-full max-w-[880px] mx-auto">
 
+          {notice && !error && (
+            <div className="mb-5 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-xs font-medium">
+              {notice}
+            </div>
+          )}
           {error && (
             <div className="mb-5 bg-[#E53E3E]/10 border border-[#E53E3E]/20 text-[#E53E3E] rounded-xl p-3 text-sm flex items-center gap-2 font-medium">
               <AlertCircle size={16} /> {error}
@@ -760,12 +802,21 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                 >
                   <input ref={fileInputRef} type="file" multiple className="hidden" accept=".pdf,.txt,.md"
                     onChange={(e) => startUpload(e.target.files)} />
+                  <input ref={folderInputRef} type="file" webkitdirectory="" directory="" multiple className="hidden"
+                    data-testid="folder-input" onChange={(e) => startUpload(e.target.files)} />
                   <div className="bg-[#E6F4F8] dark:bg-[#2B6CB0]/20 rounded-full w-14 h-14 flex items-center justify-center text-[#2B6CB0] dark:text-cyan-300 border border-[#A2D9E8]/30 group-hover:scale-105 transition-transform duration-300">
                     <Upload size={24} />
                   </div>
                   <div className="text-center">
                     <h3 className="font-semibold text-[#1A365D] dark:text-white text-base">{t.dropHere}</h3>
                     <p className="text-[11px] text-slate-400 mt-1.5 font-medium leading-relaxed">{t.dropHint}</p>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
+                      className="mt-3 text-xs font-bold text-[#2B6CB0] underline underline-offset-2 hover:text-[#1A365D]"
+                    >
+                      {t.pickFolder}
+                    </button>
                   </div>
                 </div>
                 <div className="bg-[#E6F4F8]/40 dark:bg-white/5 border border-[#A2D9E8]/20 dark:border-white/5 p-4 rounded-2xl flex gap-3 text-left">
