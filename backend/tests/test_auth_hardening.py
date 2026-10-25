@@ -108,3 +108,8 @@ def test_signup_then_login_password_works_and_wrong_fails():
         assert _post_login({"provider": "credentials", "email": email, "password": "WRONG"}).status_code == 401
     finally:
         _save_users([u for u in _load_users() if u.get("email") != email])
+
+
+def test_signup_rejects_short_password():
+    r = _post_signup({"provider": "credentials", "email": "shortpw@example.com", "password": "short"})
+    assert r.status_code == 400

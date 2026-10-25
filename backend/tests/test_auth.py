@@ -210,7 +210,7 @@ def test_login_credentials_returns_access_token(client, monkeypatch, tmp_path):
     unregistered = client.post("/api/auth/login", json={
         "provider": "credentials",
         "email": "brandnew@example.com",
-        "password": "hunter2",
+        "password": "hunter2pass",
     })
     assert unregistered.status_code == 401
 
@@ -219,7 +219,7 @@ def test_login_credentials_returns_access_token(client, monkeypatch, tmp_path):
     r = client.post("/api/auth/signup", json={
         "provider": "credentials",
         "email": "brandnew@example.com",
-        "password": "hunter2",
+        "password": "hunter2pass",
     })
     assert r.status_code == 200
     body = r.json()
@@ -238,7 +238,7 @@ def test_login_credentials_returns_access_token(client, monkeypatch, tmp_path):
     r2 = client.post("/api/auth/login", json={
         "provider": "credentials",
         "email": "brandnew@example.com",
-        "password": "hunter2",
+        "password": "hunter2pass",
     })
     assert r2.status_code == 200
     assert r2.json()["tenant_id"] == body["tenant_id"]

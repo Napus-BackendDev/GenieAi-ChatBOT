@@ -409,6 +409,8 @@ async def signup(req: SignupRequest, response: Response, request: Request):
             raise HTTPException(status_code=400, detail="กรุณากรอกอีเมล")
         if not password:
             raise HTTPException(status_code=400, detail="กรุณากรอกรหัสผ่าน")
+        if len(password) < 8:
+            raise HTTPException(status_code=400, detail="รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร")
 
         existing_user = await db_find_user(email=email)
         if existing_user:
