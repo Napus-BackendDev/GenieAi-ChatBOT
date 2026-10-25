@@ -89,6 +89,8 @@ async def complete_text(
     tenant_id: str,
     model: str = "gpt-4o-mini",
     max_tokens: int | None = None,
+    timeout: float = 30,
+    json_mode: bool = False,
 ) -> str:
     """Budgeted text completion for extraction and other non-chat workflows."""
     if settings.AI_PROVIDER == "disabled":
@@ -97,10 +99,9 @@ async def complete_text(
         return "{}"
     allowed_models = {value.strip() for value in settings.AI_ALLOWED_MODELS.split(",") if value.strip()}
     selected_model = model if model in allowed_models else "gpt-4o-mini"
-    output_cap = min(
-        max(1, int(max_tokens or settings.AI_MAX_OUTPUT_TOKENS)),
-        settings.AI_MAX_OUTPUT_TOKENS,
-    )
+    # Callers that ask for more than the chat cap (profile extraction) get the larger extraction cap.
+    ceiling = settings.AI_MAX_EXTRACTION_OUTPUT_TOKENS if max_tokens else settings.AI_MAX_OUTPUT_TOKENS
+    output_cap = min(max(1, int(max_tokens or settings.AI_MAX_OUTPUT_TOKENS)), ceiling)
     reservation = await reserve(tenant_id, estimate_tokens(prompt, output_cap))
     try:
         response = await openai_client.chat.completions.create(
@@ -108,7 +109,8 @@ async def complete_text(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
             max_tokens=output_cap,
-            timeout=30,
+            timeout=timeout,
+            **({"response_format": {"type": "json_object"}} if json_mode else {}),
         )
         usage = getattr(response, "usage", None)
         await reconcile(reservation, getattr(usage, "total_tokens", 0) if usage else 0)

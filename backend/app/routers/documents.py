@@ -98,6 +98,9 @@ async def _process_upload_job(job_id: str, tmp_path: str, filename: str, tenant_
         # 4. Extract all profile rules (company details, services, staff, rules, promotions, FAQ) in 1 single call
         # to prevent 429 rate limit errors (from multiple sequential GPT-4o-mini calls).
         extracted_json = await extract_all_profile_from_text(full_raw_text, tenant_id=tenant_id)
+        if len(full_raw_text) > 200 and not any(extracted_json.values()):
+            # Empty extraction (timeout / truncated JSON) must not look like success to the UI.
+            raise RuntimeError("EXTRACTION_EMPTY")
 
         # Emit services_done progress with a small delay for smooth frontend UI animations
         await asyncio.sleep(0.5)
@@ -213,7 +216,7 @@ async def extract_all_profile_from_text(text: str, tenant_id: str = "default") -
     delay = 3.0
     for attempt in range(max_retries):
         try:
-            raw_content = await complete_text(prompt, tenant_id=tenant_id)
+            raw_content = await complete_text(prompt, tenant_id=tenant_id, max_tokens=settings.AI_MAX_EXTRACTION_OUTPUT_TOKENS, timeout=120, json_mode=True)
             if raw_content.startswith("```"):
                 raw_content = raw_content.replace("```json", "").replace("```", "").strip()
             return json.loads(raw_content)
@@ -289,7 +292,7 @@ async def extract_business_rules_from_text(text: str, tenant_id: str = "default"
         f"ข้อความที่ต้องการวิเคราะห์:\n\"\"\"\n{text}\n\"\"\""
     )
     try:
-        raw_content = await complete_text(prompt, tenant_id=tenant_id)
+        raw_content = await complete_text(prompt, tenant_id=tenant_id, max_tokens=settings.AI_MAX_EXTRACTION_OUTPUT_TOKENS, timeout=120, json_mode=True)
         if raw_content.startswith("```"):
             raw_content = raw_content.replace("```json", "").replace("```", "").strip()
         return json.loads(raw_content)

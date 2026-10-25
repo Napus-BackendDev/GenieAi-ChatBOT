@@ -225,3 +225,38 @@ def test_tenant_image_rejects_spoofed_content(monkeypatch, tmp_path):
         _run(tenant.upload_tenant_image("tenant-a", upload, "tenant-a"))
     assert exc.value.status_code == 400
     assert list(tmp_path.rglob("*.*")) == []
+
+
+def test_complete_text_extraction_gets_larger_output_cap(monkeypatch):
+    """Regression: profile extraction JSON was truncated by the 600-token chat cap."""
+    import asyncio
+    from types import SimpleNamespace
+    from app.core.config import settings
+    from app.services import openai_service
+
+    seen = {}
+
+    async def fake_create(**kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))])
+
+    async def fake_reserve(*_a, **_k):
+        return ("g", "t", 1)
+
+    async def fake_reconcile(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(settings, "AI_PROVIDER", "openai")
+    monkeypatch.setattr(openai_service, "reserve", fake_reserve)
+    monkeypatch.setattr(openai_service, "reconcile", fake_reconcile)
+    monkeypatch.setattr(openai_service.openai_client.chat.completions, "create", fake_create)
+
+    asyncio.new_event_loop().run_until_complete(openai_service.complete_text("p", "t"))
+    assert seen["max_tokens"] == settings.AI_MAX_OUTPUT_TOKENS
+    assert "response_format" not in seen
+
+    asyncio.new_event_loop().run_until_complete(
+        openai_service.complete_text("p", "t", max_tokens=10**6, json_mode=True)
+    )
+    assert seen["max_tokens"] == settings.AI_MAX_EXTRACTION_OUTPUT_TOKENS
+    assert seen["response_format"] == {"type": "json_object"}

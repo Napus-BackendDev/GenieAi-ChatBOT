@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     AI_TENANT_DAILY_TOKEN_CAP: int = 100_000
     AI_TENANT_DAILY_REQUEST_CAP: int = 500
     AI_MAX_OUTPUT_TOKENS: int = 600
+    AI_MAX_EXTRACTION_OUTPUT_TOKENS: int = 8_000  # structured-profile JSON is far longer than a chat reply
     AI_MAX_OCR_OUTPUT_TOKENS_PER_PAGE: int = 2_000
     AI_MAX_EMBEDDING_INPUT_TOKENS: int = 8_000
     AI_MAX_TOOL_ITERATIONS: int = 6
