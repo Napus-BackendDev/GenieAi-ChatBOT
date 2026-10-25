@@ -278,6 +278,153 @@ async def db_update_deletion_job(job_id: str, **updates) -> None:
 # 1. Users Module (Collection: users)
 # ==========================================
 
+def normalize_email(email: str | None) -> str:
+    return (email or "").strip().lower()
+
+
+async def db_find_user(
+    *,
+    tenant_id: str | None = None,
+    email: str | None = None,
+    google_sub: str | None = None,
+) -> dict | None:
+    """Find a single user by tenant_id, normalized email, or google_sub."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            query = {}
+            if tenant_id:
+                query = {"tenant_id": tenant_id}
+            elif google_sub:
+                query = {"google_sub": google_sub}
+            elif email:
+                norm = normalize_email(email)
+                query = {"$or": [{"email_normalized": norm}, {"email": norm}]}
+            if query:
+                user = await db.users.find_one(query)
+                if user:
+                    return _clean_mongo_doc(user)
+                return None
+        except Exception as e:
+            logger.error(f"Error finding user in MongoDB: {e}")
+            if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+                raise
+
+    _require_local_fallback("find user")
+    users = await db_load_users()
+    if tenant_id:
+        return next((u for u in users if u.get("tenant_id") == tenant_id), None)
+    if google_sub:
+        return next((u for u in users if u.get("google_sub") == google_sub), None)
+    if email:
+        norm = normalize_email(email)
+        return next(
+            (u for u in users if normalize_email(u.get("email_normalized") or u.get("email")) == norm),
+            None,
+        )
+    return None
+
+
+async def db_create_user(user: dict) -> dict:
+    """Atomically create a new user record.
+
+    Guarantees unique tenant_id, email_normalized, and google_sub.
+    """
+    cleaned = dict(user)
+    cleaned["email_normalized"] = normalize_email(cleaned.get("email", ""))
+    cleaned["status"] = cleaned.get("status", "active")
+    cleaned["session_version"] = int(cleaned.get("session_version") or 0)
+    cleaned["created_at"] = datetime.now(timezone.utc)
+    if "contact_email" not in cleaned:
+        cleaned["contact_email"] = cleaned.get("email", "")
+
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            await db.users.insert_one(dict(cleaned))
+            return _clean_mongo_doc(cleaned)
+        except Exception as e:
+            logger.error(f"Error creating user in MongoDB: {e}")
+            raise
+
+    _require_local_fallback("create user")
+    file_path = _get_users_file_path()
+    with _users_lock:
+        _ensure_dir_for_file(file_path)
+        users = []
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    users = json.load(f)
+            except Exception:
+                users = []
+
+        # Enforce unique constraints in local store
+        for existing in users:
+            if existing.get("tenant_id") == cleaned["tenant_id"]:
+                raise ValueError(f"Duplicate tenant_id: {cleaned['tenant_id']}")
+            if cleaned["email_normalized"] and normalize_email(existing.get("email_normalized") or existing.get("email")) == cleaned["email_normalized"]:
+                raise ValueError(f"Duplicate email: {cleaned['email_normalized']}")
+            if cleaned.get("google_sub") and existing.get("google_sub") == cleaned["google_sub"]:
+                raise ValueError(f"Duplicate google_sub: {cleaned['google_sub']}")
+
+        users.append(cleaned)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(users, f, ensure_ascii=False, indent=2, default=str)
+    return cleaned
+
+
+async def db_update_user_fields(tenant_id: str, fields: dict) -> dict | None:
+    """Atomically update allowed fields for a single user using $set.
+
+    Never upserts and never allows modifying status or session_version directly.
+    """
+    allowed_fields = {
+        "name", "picture", "company_name", "business_type",
+        "contact_email", "phone", "google_sub", "password_hash",
+        "email_normalized",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed_fields}
+    if not updates:
+        return await db_get_user_by_tenant(tenant_id)
+
+    updates["updated_at"] = datetime.now(timezone.utc)
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            from pymongo import ReturnDocument
+            doc = await db.users.find_one_and_update(
+                {"tenant_id": tenant_id},
+                {"$set": updates},
+                upsert=False,
+                return_document=ReturnDocument.AFTER,
+            )
+            return _clean_mongo_doc(doc) if doc else None
+        except Exception as e:
+            logger.error(f"Error updating user fields in MongoDB: {e}")
+            if not settings.ALLOW_LOCAL_DATA_FALLBACK:
+                raise
+
+    _require_local_fallback("update user fields")
+    file_path = _get_users_file_path()
+    with _users_lock:
+        users = []
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    users = json.load(f)
+            except Exception:
+                users = []
+        target = next((u for u in users if u.get("tenant_id") == tenant_id), None)
+        if not target:
+            return None
+        for k, v in updates.items():
+            target[k] = v
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(users, f, ensure_ascii=False, indent=2, default=str)
+        return target
+
+
 async def db_load_users() -> list[dict]:
     db = _mongo_db_or_none()
     if db is not None:
@@ -394,12 +541,13 @@ async def db_save_profile(tenant_id: str, profile_data: dict) -> None:
 # 3. Bookings Module (Collection: bookings)
 # ==========================================
 
-async def db_load_bookings() -> list[dict]:
+async def db_load_bookings(tenant_id: str | None = None) -> list[dict]:
     db = _mongo_db_or_none()
     if db is not None:
         try:
             # ponytail: Mongo returns the same list-of-dicts shape as bookings.json.
-            cursor = db.bookings.find({})
+            query = {"tenant_id": tenant_id} if tenant_id else {}
+            cursor = db.bookings.find(query)
             return [_clean_mongo_doc(b) for b in await cursor.to_list(length=10000)]
         except Exception as e:
             logger.error(f"Error loading bookings from MongoDB: {e}")
@@ -415,7 +563,10 @@ async def db_load_bookings() -> list[dict]:
             return []
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                bookings = json.load(f)
+            if tenant_id:
+                return [b for b in bookings if b.get("tenant_id") == tenant_id]
+            return bookings
         except Exception as e:
             logger.error(f"Error loading bookings JSON: {e}")
             return []
@@ -493,12 +644,13 @@ async def db_delete_booking(booking_id: str, tenant_id: str | None = None) -> bo
 # 4. Documents Metadata Module (Collection: documents)
 # ==========================================
 
-async def db_load_documents() -> list[dict]:
+async def db_load_documents(tenant_id: str | None = None) -> list[dict]:
     db = _mongo_db_or_none()
     if db is not None:
         try:
             # ponytail: Mongo document metadata keeps the data/documents.json schema.
-            cursor = db.documents.find({})
+            query = {"tenant_id": tenant_id} if tenant_id else {}
+            cursor = db.documents.find(query)
             return [_clean_mongo_doc(d) for d in await cursor.to_list(length=10000)]
         except Exception as e:
             logger.error(f"Error loading documents from MongoDB: {e}")
@@ -514,7 +666,10 @@ async def db_load_documents() -> list[dict]:
             return []
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                docs = json.load(f)
+            if tenant_id:
+                return [d for d in docs if d.get("tenant_id") == tenant_id]
+            return docs
         except Exception as e:
             logger.error(f"Error loading documents JSON: {e}")
             return []
@@ -933,6 +1088,35 @@ async def db_resolve_tenant_by_fb_page_id(page_id: str) -> str | None:
             with open(path, "r", encoding="utf-8") as f:
                 prof = json.load(f)
             if prof.get("facebook_page_id") == page_id:
+                return prof.get("tenant_id") or os.path.basename(path)[len("tenant_profile_"):-len(".json")]
+        except Exception:
+            continue
+    return None
+
+
+async def db_resolve_tenant_by_line_bot_id(bot_user_id: str) -> str | None:
+    """Which tenant owns this LINE bot user ID? None if unmapped."""
+    if not bot_user_id:
+        return None
+    db = _mongo_db_or_none()
+    if db is not None:
+        try:
+            doc = await db.tenant_profiles.find_one(
+                {"line_bot_user_id": bot_user_id}, {"tenant_id": 1}
+            )
+            return doc.get("tenant_id") if doc else None
+        except Exception as e:
+            logger.error(f"Error resolving tenant by LINE bot user id: {e}")
+            return None
+
+    _require_local_fallback("resolve LINE tenant")
+    import glob
+    data_dir = os.path.dirname(_get_profile_path("x")) or "data"
+    for path in glob.glob(os.path.join(data_dir, "tenant_profile_*.json")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                prof = json.load(f)
+            if prof.get("line_bot_user_id") == bot_user_id:
                 return prof.get("tenant_id") or os.path.basename(path)[len("tenant_profile_"):-len(".json")]
         except Exception:
             continue

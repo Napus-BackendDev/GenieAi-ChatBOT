@@ -50,6 +50,18 @@ async def _ensure_indexes(db) -> None:
     an index error must never take down the app (JSON fallback would still work)."""
     try:
         await db.users.create_index("tenant_id", unique=True, name="uniq_tenant_id")
+        await db.users.create_index(
+            "email_normalized",
+            unique=True,
+            name="uniq_email_normalized",
+            partialFilterExpression={"email_normalized": {"$gt": ""}},
+        )
+        await db.users.create_index(
+            "google_sub",
+            unique=True,
+            name="uniq_google_sub",
+            partialFilterExpression={"google_sub": {"$gt": ""}},
+        )
         await db.tenant_profiles.create_index("tenant_id", unique=True, name="uniq_tenant_id")
         # Durable chat inbox: one doc per (tenant, session); list sorted by recency.
         await db.conversations.create_index(
@@ -64,6 +76,13 @@ async def _ensure_indexes(db) -> None:
             unique=True,
             name="uniq_fb_page_id",
             partialFilterExpression={"facebook_page_id": {"$gt": ""}},
+        )
+        # Fast reverse lookup for LINE webhook routing (bot_user_id -> tenant).
+        await db.tenant_profiles.create_index(
+            "line_bot_user_id",
+            unique=True,
+            name="uniq_line_bot_user_id",
+            partialFilterExpression={"line_bot_user_id": {"$gt": ""}},
         )
         await db.documents.create_index("tenant_id", name="idx_tenant_id")
         await db.documents.create_index(

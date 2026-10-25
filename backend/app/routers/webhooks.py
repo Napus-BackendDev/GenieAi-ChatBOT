@@ -501,6 +501,7 @@ async def _handle_line_event_inner(event: dict, base_url: str, tenant_id: str = 
             type_t = _typing_seconds(bubble, params)
             await show_line_loading(user_id, seconds=type_t, access_token=access_token)
             logger.info(f"[humanize={humanize}] typing {type_t:.1f}s before bubble {i}/{len(bubbles)}")
+
             await asyncio.sleep(type_t)
         else:
             # 'off': tiny gap so bubbles don't all land in the same instant.
@@ -546,7 +547,8 @@ async def line_webhook(
     x_line_signature: str = Header(None)
 ):
     """
-    Fallback endpoint for incoming LINE webhook events (routes to active tenant).
+    Endpoint for incoming LINE webhook events.
+    Resolves tenant by payload 'destination' (LINE bot user ID).
     """
     from app.core.config import settings
     if not settings.ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS:
@@ -554,27 +556,50 @@ async def line_webhook(
             status_code=404,
             detail="Use the tenant-specific LINE webhook URL.",
         )
-    active_tenant_id = await get_active_tenant_id()
-    _, secret = await get_tenant_line_credentials(active_tenant_id)
-    
+
     body = await request.body()
     body_str = body.decode("utf-8")
-    
-    # Verify request signature using tenant-specific secret
-    if not verify_line_signature(body, x_line_signature, channel_secret=secret):
-        logger.warning(f"Received invalid X-Line-Signature for active tenant {active_tenant_id}. Rejecting request.")
-        raise HTTPException(status_code=403, detail="Invalid signature")
-        
+
     try:
         payload = json.loads(body_str)
     except Exception as e:
         logger.error(f"JSON Parsing FAILED: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
+    destination = str(payload.get("destination") or "").strip()
+    active_tenant_id = None
+    if destination:
+        from app.core.db import db_resolve_tenant_by_line_bot_id
+        active_tenant_id = await db_resolve_tenant_by_line_bot_id(destination)
+
+    if not active_tenant_id:
+        from app.core.config import settings
+        if not settings.ALLOW_LEGACY_SINGLE_TENANT_WEBHOOKS:
+            logger.warning(f"Rejecting unmapped LINE webhook destination '{destination}' (legacy fallback disabled)")
+            raise HTTPException(
+                status_code=404,
+                detail="No tenant mapped to this LINE bot.",
+            )
+        active_tenant_id = await get_active_tenant_id()
+
+    # Suppress webhooks for inactive/locked/deleting tenants
+    from app.core.db import db_get_user_by_tenant
+    tenant_user = await db_get_user_by_tenant(active_tenant_id)
+    if tenant_user and tenant_user.get("status", "active") != "active":
+        logger.warning(f"Ignoring LINE webhook for tenant {active_tenant_id}: status is {tenant_user.get('status')}")
+        return {"status": "ignored", "reason": "tenant_inactive"}
+
+    _, secret = await get_tenant_line_credentials(active_tenant_id)
+
+    # Verify request signature using tenant-specific secret
+    if not verify_line_signature(body, x_line_signature, channel_secret=secret):
+        logger.warning(f"Received invalid X-Line-Signature for tenant {active_tenant_id}. Rejecting request.")
+        raise HTTPException(status_code=403, detail="Invalid signature")
+
     events = payload.get("events", [])
     base_url = str(request.base_url)
-    
-    logger.info(f"Routing LINE webhook events to active tenant: {active_tenant_id}")
+
+    logger.info(f"Routing LINE webhook events to tenant: {active_tenant_id}")
     for event in events:
         from app.core.mongodb import is_mongo_connected
         if is_mongo_connected():
@@ -586,10 +611,8 @@ async def line_webhook(
                 {"event": event, "base_url": base_url},
             )
             continue
+        from app.core.config import settings
         if settings.is_production:
-            # A volatile BackgroundTask is not an acceptable production queue.
-            # Make the provider retry instead of acknowledging an event that may
-            # disappear during a restart.
             raise HTTPException(status_code=503, detail="Webhook queue is temporarily unavailable")
         from app.core.idempotency import claim_webhook_event, run_claimed_webhook_event
         event_id = event.get("webhookEventId")
@@ -605,7 +628,7 @@ async def line_webhook(
             base_url,
             active_tenant_id,
         )
-        
+
     return {"status": "ok"}
 
 @router.post("/line/{tenant_id}")
@@ -618,9 +641,14 @@ async def line_webhook_tenant(
     """
     Multi-tenant endpoint routing LINE webhook events directly to the specified tenant_id.
     """
-    # Resolve credentials STRICTLY per-tenant. No fallback to the global secret here:
-    # accepting a global-secret signature for an arbitrary tenant_id would let anyone
-    # spoof a victim tenant's webhook. Reject tenants that aren't configured.
+    # Suppress webhooks for inactive/locked/deleting tenants
+    from app.core.db import db_get_user_by_tenant, db_load_profile
+    tenant_user = await db_get_user_by_tenant(tenant_id)
+    if tenant_user and tenant_user.get("status", "active") != "active":
+        logger.warning(f"Ignoring LINE webhook for tenant {tenant_id}: status is {tenant_user.get('status')}")
+        return {"status": "ignored", "reason": "tenant_inactive"}
+
+    # Resolve credentials STRICTLY per-tenant.
     _, secret = await get_strict_tenant_line_credentials(tenant_id)
     if not secret:
         logger.warning(f"Rejecting webhook for tenant {tenant_id}: no per-tenant LINE channel configured.")
@@ -633,16 +661,25 @@ async def line_webhook_tenant(
     if not verify_line_signature(body, x_line_signature, channel_secret=secret):
         logger.warning(f"Received invalid X-Line-Signature for tenant {tenant_id}. Rejecting request.")
         raise HTTPException(status_code=403, detail="Invalid signature")
-        
+
     try:
         payload = json.loads(body_str)
     except Exception as e:
         logger.error(f"JSON Parsing FAILED: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON body")
-        
+
+    # Validate destination bot user ID if configured
+    destination = str(payload.get("destination") or "").strip()
+    if destination:
+        profile = await db_load_profile(tenant_id) or {}
+        configured_bot_id = str(profile.get("line_bot_user_id") or "").strip()
+        if configured_bot_id and configured_bot_id != destination:
+            logger.warning(f"LINE destination mismatch for {tenant_id}: got {destination}, expected {configured_bot_id}")
+            raise HTTPException(status_code=403, detail="LINE destination mismatch")
+
     events = payload.get("events", [])
     base_url = str(request.base_url)
-    
+
     logger.info(f"Routing LINE webhook events to tenant: {tenant_id}")
     for event in events:
         from app.core.mongodb import is_mongo_connected

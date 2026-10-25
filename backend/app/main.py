@@ -127,28 +127,34 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
 @app.middleware("http")
 async def csrf_protection(request: Request, call_next):
-    """Protect cookie-authenticated state changes with double-submit CSRF."""
+    """Protect cookie-authenticated state changes with double-submit CSRF and origin validation."""
     unsafe = request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
     path = request.url.path
     exempt = (
-        path == "/api/auth/login"
-        or path == "/api/auth/providers"
+        path in {"/api/auth/login", "/api/auth/signup", "/api/auth/link-google", "/api/auth/providers"}
         or path.startswith("/api/webhooks/")
     )
     session_present = bool(request.cookies.get(settings.SESSION_COOKIE_NAME))
-    if unsafe and session_present and not exempt:
-        cookie_token = request.cookies.get(settings.CSRF_COOKIE_NAME, "")
-        header_token = request.headers.get(settings.CSRF_HEADER_NAME, "")
+
+    # Origin & Fetch Metadata check for all unsafe requests (including unauthenticated login/signup)
+    if unsafe and not path.startswith("/api/webhooks/"):
         origin = request.headers.get("Origin")
         fetch_site = request.headers.get("Sec-Fetch-Site", "").lower()
         origin_ok = not origin or origin in settings.cors_origins
         fetch_site_ok = fetch_site not in {"cross-site"}
+        if not (origin_ok and fetch_site_ok):
+            if settings.CSRF_ENFORCEMENT == "report":
+                logger.warning("Origin/Fetch-Site validation failed in report-only mode: %s", path)
+            else:
+                return JSONResponse(status_code=403, content={"detail": "CSRF_VALIDATION_FAILED"})
+
+    if unsafe and session_present and not exempt:
+        cookie_token = request.cookies.get(settings.CSRF_COOKIE_NAME, "")
+        header_token = request.headers.get(settings.CSRF_HEADER_NAME, "")
         valid = bool(
             cookie_token
             and header_token
             and hmac.compare_digest(cookie_token, header_token)
-            and origin_ok
-            and fetch_site_ok
         )
         if not valid:
             if settings.CSRF_ENFORCEMENT == "report":
@@ -157,7 +163,10 @@ async def csrf_protection(request: Request, call_next):
                 return JSONResponse(status_code=403, content={"detail": "CSRF_VALIDATION_FAILED"})
 
     response = await call_next(request)
-    if not request.cookies.get(settings.CSRF_COOKIE_NAME) and not path.startswith("/api/webhooks/"):
+    already_set = any(
+        settings.CSRF_COOKIE_NAME in h for h in response.headers.getlist("set-cookie")
+    )
+    if not request.cookies.get(settings.CSRF_COOKIE_NAME) and not already_set and not path.startswith("/api/webhooks/"):
         response.set_cookie(
             key=settings.CSRF_COOKIE_NAME,
             value=secrets.token_urlsafe(32),
@@ -168,6 +177,41 @@ async def csrf_protection(request: Request, call_next):
             path="/",
         )
     return response
+
+
+@app.middleware("http")
+async def tenant_context_guard(request: Request, call_next):
+    """Ensure cookie-authenticated write operations match the active UI tenant context."""
+    unsafe = request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+    path = request.url.path
+    exempt = (
+        path in {"/api/auth/login", "/api/auth/signup", "/api/auth/link-google", "/api/auth/providers"}
+        or path.startswith("/api/webhooks/")
+    )
+    session_present = bool(request.cookies.get(settings.SESSION_COOKIE_NAME))
+    tenant_context = request.headers.get("X-Tenant-Context")
+
+    if unsafe and session_present and not exempt and tenant_context:
+        try:
+            token = extract_request_token(
+                request.headers.get("Authorization"),
+                request.cookies.get(settings.SESSION_COOKIE_NAME),
+            )
+            if token:
+                claims = decode_admin_token(token)
+                session_tenant = claims.get("sub")
+                if session_tenant and tenant_context.strip() != session_tenant:
+                    return JSONResponse(
+                        status_code=409,
+                        content={
+                            "detail": "SESSION_CONTEXT_CHANGED",
+                            "message": "Session context changed in another tab.",
+                        },
+                    )
+        except Exception:
+            pass
+
+    return await call_next(request)
 
 
 @app.middleware("http")

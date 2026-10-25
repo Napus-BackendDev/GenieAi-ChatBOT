@@ -54,6 +54,12 @@ async def enqueue_webhook_event(
     provider_event_id: str | None,
     payload: dict,
 ) -> bool:
+    from app.core.db import db_get_user_by_tenant
+    user = await db_get_user_by_tenant(tenant_id)
+    if user and user.get("status", "active") != "active":
+        logger.warning("Refusing to enqueue webhook for inactive tenant %s (%s)", tenant_id, user.get("status"))
+        return False
+
     db = get_mongo_db()
     if db is None:
         return False
@@ -135,6 +141,17 @@ async def _process_event(event: dict) -> None:
     if db is None:
         return
     event_id = event["provider_event_id"]
+
+    from app.core.db import db_get_user_by_tenant
+    user = await db_get_user_by_tenant(event["tenant_id"])
+    if user and user.get("status", "active") != "active":
+        logger.warning("Dropping webhook event for inactive tenant %s (%s)", event["tenant_id"], user.get("status"))
+        await db.webhook_events.update_one(
+            {"channel": event["channel"], "tenant_id": event["tenant_id"], "provider_event_id": event_id},
+            {"$set": {"status": "suppressed", "completed_at": _now(), "lease_until": None}},
+        )
+        return
+
     try:
         await _dispatch(event)
         await db.webhook_events.update_one(

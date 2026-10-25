@@ -114,6 +114,15 @@ class Settings(BaseSettings):
 
     def validate_runtime(self) -> None:
         """Fail closed when a production deployment is configured unsafely."""
+        is_render = bool(
+            os.getenv("RENDER")
+            or os.getenv("RENDER_SERVICE_ID")
+            or os.getenv("RENDER_INSTANCE_ID")
+            or self.RENDER_EXTERNAL_HOSTNAME.strip()
+        )
+        if is_render and not self.is_production:
+            raise RuntimeError("RENDER_NON_PRODUCTION_ENVIRONMENT: Application running on Render must set ENVIRONMENT=production")
+
         if not self.is_production:
             return
 

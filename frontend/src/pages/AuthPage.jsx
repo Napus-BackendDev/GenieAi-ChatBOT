@@ -3,31 +3,9 @@ import { Mail, Lock, ArrowRight, Store, Sparkles, BookOpen } from 'lucide-react'
 import { Button, Checkbox, InputGroup, Label, TextField } from '@heroui/react';
 import Mascot3D from '../components/Mascot3D';
 import { parseApiJson } from '../lib/apiResponse';
+import { loadGoogleSdk, resetGoogleSdk } from '../lib/googleSdk';
 
 const mockLoginEnabled = import.meta.env.DEV && import.meta.env.VITE_ENABLE_MOCK_LOGIN === 'true';
-let googleSdkPromise;
-
-const loadGoogleSdkOnce = () => {
-  if (window.google) return Promise.resolve(window.google);
-  if (googleSdkPromise) return googleSdkPromise;
-  googleSdkPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById('genie-google-identity-sdk');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(window.google));
-      existing.addEventListener('error', reject);
-      return;
-    }
-    const script = document.createElement('script');
-    script.id = 'genie-google-identity-sdk';
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.google);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  return googleSdkPromise;
-};
 
 const translations = {
   th: {
@@ -104,11 +82,19 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
   const [showForgotHelp, setShowForgotHelp] = useState(false);
   const [sdkLoaded, setSdkLoaded] = useState(false);
+  const [googleSdkFailed, setGoogleSdkFailed] = useState(false);
   const [googleConfig, setGoogleConfig] = useState(null);
+  const [providerStatus, setProviderStatus] = useState('loading'); // 'loading' | 'ready' | 'disabled' | 'unavailable'
   const googleInitializedFor = useRef('');
+  const googleLoginInFlightRef = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  // Account linking state when a Google account matches an existing password account
+  const [linkingData, setLinkingData] = useState(null); // { email, google_token }
+  const [linkingPassword, setLinkingPassword] = useState('');
+  const [linkingLoading, setLinkingLoading] = useState(false);
+
+  const fetchProviders = useCallback(() => {
+    setProviderStatus('loading');
     fetch('/api/auth/providers', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -119,16 +105,24 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
         return data;
       })
       .then((data) => {
-        if (!cancelled) setGoogleConfig(data?.google?.enabled && data.google.client_id ? data.google : { enabled: false });
-      })
-      .catch(() => {
-        if (!cancelled) {
+        if (data?.google?.enabled && data.google?.client_id) {
+          setGoogleConfig(data.google);
+          setProviderStatus('ready');
+        } else {
           setGoogleConfig({ enabled: false });
-          setError(t.apiUnavailable);
+          setProviderStatus('disabled');
         }
+      })
+      .catch((err) => {
+        console.warn('Failed to fetch auth providers:', err);
+        setGoogleConfig({ enabled: false });
+        setProviderStatus('unavailable');
       });
-    return () => { cancelled = true; };
   }, [t.apiUnavailable]);
+
+  useEffect(() => {
+    fetchProviders();
+  }, [fetchProviders]);
 
   const handleCredentialsSubmit = async (e) => {
     e.preventDefault();
@@ -136,25 +130,28 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const endpoint = activeTab === 'signup' ? '/api/auth/signup' : '/api/auth/login';
+      const bodyPayload = activeTab === 'signup'
+        ? { email: email.trim(), password, keep_logged_in: keepLoggedIn }
+        : { provider: 'credentials', email: email.trim(), password, keep_logged_in: keepLoggedIn };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({
-          provider: 'credentials',
-          email: email.trim(),
-          password: password,
-          keep_logged_in: keepLoggedIn
-        })
+        body: JSON.stringify(bodyPayload)
       });
 
       const data = await parseApiJson(response, t.apiUnavailable);
       if (!response.ok) {
-        throw new Error(data.detail || 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
+        if (response.status === 401) {
+          throw new Error(lang === 'th' ? 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' : 'Invalid email or password');
+        }
+        if (response.status === 409) {
+          throw new Error(lang === 'th' ? 'อีเมลนี้ถูกใช้งานแล้ว กรุณาเข้าสู่ระบบ' : 'This email is already registered. Please log in.');
+        }
+        throw new Error(data.detail || (lang === 'th' ? 'เกิดข้อผิดพลาดในการเข้าสู่ระบบ' : 'Authentication failed'));
       }
 
-      // Whether the account is new or returning, App decides routing:
-      // new tenants (no saved profile) are sent into the onboarding wizard,
-      // which collects company/business info in its Info step.
       onAuthSuccess(data, keepLoggedIn);
     } catch (err) {
       setError(err.message);
@@ -164,47 +161,109 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
   };
 
   const handleGoogleLoginResponse = useCallback(async (googleRes) => {
+    if (googleLoginInFlightRef.current) return;
+    googleLoginInFlightRef.current = true;
     setError('');
     setLoading(true);
 
     try {
-      if (!googleRes?.credential) {
-        throw new Error('Google did not return a sign-in credential');
+      if (googleRes?.error === 'popup_closed_by_user') {
+        throw new Error(lang === 'th' ? 'หน้าต่างเข้าสู่ระบบ Google ถูกปิดก่อนทำรายการเสร็จสิ้น' : 'Google sign-in popup was closed before completion.');
       }
-      const response = await fetch('/api/auth/login', {
+      if (!googleRes?.credential) {
+        throw new Error(lang === 'th' ? 'ไม่ได้รับข้อมูลยืนยันตัวตนจาก Google กรุณาลองใหม่อีกครั้ง' : 'No credential received from Google. Please try again.');
+      }
+      const endpoint = activeTab === 'signup' ? '/api/auth/signup' : '/api/auth/login';
+      const bodyPayload = {
+        provider: 'google',
+        token: googleRes.credential,
+        keep_logged_in: keepLoggedIn
+      };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ 
-          provider: 'google',
-          token: googleRes.credential,
-          keep_logged_in: keepLoggedIn
-        })
+        body: JSON.stringify(bodyPayload)
       });
 
       const data = await parseApiJson(response, t.apiUnavailable);
       if (!response.ok) {
-        throw new Error(data.detail || 'Google Auth Failed');
+        if (response.status === 409 && (data.code === 'ACCOUNT_LINK_REQUIRED' || data.detail === 'ACCOUNT_LINK_REQUIRED')) {
+          setLinkingData({ email: data.email || email.trim(), google_token: googleRes.credential });
+          return;
+        }
+        if (response.status === 404) {
+          throw new Error(lang === 'th' ? 'ยังไม่มีบัญชีที่ผูกกับ Google นี้ กรุณาเลือก "สร้างบัญชีผู้ใช้"' : 'No account found for this Google login. Please select "Create Account".');
+        }
+        if (response.status === 409) {
+          throw new Error(lang === 'th' ? 'บัญชี Google นี้ลงทะเบียนไว้แล้ว กรุณาเลือก "เข้าสู่ระบบ"' : 'This account is already registered. Please select "Log In".');
+        }
+        if (response.status === 503) {
+          throw new Error(lang === 'th' ? 'ระบบยืนยันตัวตนไม่พร้อมใช้งานชั่วคราว กรุณาลองใหม่ภายหลัง' : 'Authentication service is temporarily unavailable. Please retry later.');
+        }
+        throw new Error(data.detail || (lang === 'th' ? 'การยืนยันตัวตนผ่าน Google ล้มเหลว' : 'Google authentication failed'));
       }
 
-      // Pass the provider's account straight through (do NOT inject a mock
-      // email/phone). App routes new tenants into the wizard, which collects
-      // any missing phone in its Info step.
       onAuthSuccess(data, keepLoggedIn);
     } catch (err) {
       setError(err.message);
     } finally {
+      googleLoginInFlightRef.current = false;
       setLoading(false);
     }
-  }, [keepLoggedIn, onAuthSuccess, t.apiUnavailable]);
+  }, [activeTab, email, keepLoggedIn, lang, onAuthSuccess, t.apiUnavailable]);
+
+  const handleLinkGoogleSubmit = async (e) => {
+    e.preventDefault();
+    if (!linkingData || !linkingPassword) return;
+    setLinkingLoading(true);
+    setError('');
+    try {
+      const response = await fetch('/api/auth/link-google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          email: linkingData.email,
+          password: linkingPassword,
+          token: linkingData.google_token,
+          google_token: linkingData.google_token,
+          keep_logged_in: keepLoggedIn
+        })
+      });
+      const data = await parseApiJson(response, t.apiUnavailable);
+      if (!response.ok) {
+        throw new Error(data.detail || (lang === 'th' ? 'รหัสผ่านไม่ถูกต้อง ไม่สามารถเชื่อมต่อ Google ได้' : 'Invalid password. Unable to link Google account.'));
+      }
+      setLinkingData(null);
+      setLinkingPassword('');
+      onAuthSuccess(data, keepLoggedIn);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLinkingLoading(false);
+    }
+  };
+
+  const loadSdk = useCallback(() => {
+    if (!googleConfig?.enabled) return;
+    setGoogleSdkFailed(false);
+    loadGoogleSdk(15000)
+      .then(() => { setSdkLoaded(true); setGoogleSdkFailed(false); })
+      .catch((e) => {
+        console.warn('Google SDK loading error:', e);
+        setGoogleSdkFailed(true);
+      });
+  }, [googleConfig?.enabled]);
 
   useEffect(() => {
-    if (!googleConfig?.enabled) return undefined;
-    let cancelled = false;
-    loadGoogleSdkOnce()
-      .then(() => { if (!cancelled) setSdkLoaded(true); })
-      .catch(() => { if (!cancelled) setError('Google Sign-In is temporarily unavailable'); });
-    return () => { cancelled = true; };
-  }, [googleConfig?.enabled]);
+    loadSdk();
+  }, [loadSdk]);
+
+  const retryGoogleSdk = () => {
+    resetGoogleSdk();
+    setSdkLoaded(false);
+    loadSdk();
+  };
 
   const googleCallbackRef = useRef(handleGoogleLoginResponse);
   useEffect(() => {
@@ -289,32 +348,95 @@ const AuthPage = ({ lang, setLang, onAuthSuccess, initialTab = 'login', onNaviga
                 </div>
               )}
 
-              {/* Google Button Container */}
-              <div className="w-full flex flex-col gap-2">
-                {googleConfig?.enabled && (
-                  <div ref={googleBtnRef} className="w-full min-h-[44px] flex justify-center"></div>
-                )}
-                {mockLoginEnabled && (
-                  <Button
-                    type="button"
-                    variant="light"
-                    size="sm"
-                    onClick={() => handleGoogleLoginResponse({ credential: 'mock' })}
-                    className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400"
-                  >
-                    {t.mockLoginNotice}
-                  </Button>
-                )}
-              </div>
+              {linkingData ? (
+                <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-5 mb-6 text-left animate-fade-in">
+                  <h3 className="font-extrabold text-base text-slate-900 dark:text-white mb-1">
+                    {lang === 'th' ? '🔗 ยืนยันการเชื่อมต่อบัญชี Google' : '🔗 Link Google Account'}
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 mb-4 leading-relaxed">
+                    {lang === 'th'
+                      ? `อีเมล ${linkingData.email} มีบัญชีในระบบแล้ว กรุณากรอกรหัสผ่านเพื่อเชื่อมต่อกับ Google สำหรับการเข้าสู่ระบบครั้งต่อไป`
+                      : `The account ${linkingData.email} already exists. Please enter your password to link your Google account.`}
+                  </p>
+                  <form onSubmit={handleLinkGoogleSubmit} className="flex flex-col gap-3">
+                    <TextField isRequired name="linkingPassword" type="password" className="w-full">
+                      <Label>{t.passwordLabel}</Label>
+                      <InputGroup>
+                        <InputGroup.Prefix><Lock className="text-slate-500" size={16} /></InputGroup.Prefix>
+                        <InputGroup.Input
+                          placeholder={t.passwordPlaceholder}
+                          value={linkingPassword}
+                          onChange={(e) => setLinkingPassword(e.target.value)}
+                          autoFocus
+                        />
+                      </InputGroup>
+                    </TextField>
+                    <div className="flex gap-2 mt-2">
+                      <Button
+                        type="submit"
+                        color="primary"
+                        className="flex-1 font-bold h-10 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white"
+                        isLoading={linkingLoading}
+                      >
+                        {lang === 'th' ? 'ยืนยันเชื่อมต่อ' : 'Confirm Link'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="light"
+                        onClick={() => { setLinkingData(null); setLinkingPassword(''); }}
+                        className="h-10 rounded-xl"
+                      >
+                        {lang === 'th' ? 'ยกเลิก' : 'Cancel'}
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              ) : (
+                <>
+                  {/* Google Button Container */}
+                  <div className="w-full flex flex-col gap-2">
+                    {googleConfig?.enabled && (
+                      <div ref={googleBtnRef} className="w-full min-h-[44px] flex justify-center"></div>
+                    )}
+                    {providerStatus === 'unavailable' && (
+                      <div className="w-full flex items-center justify-between p-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs">
+                        <span>{lang === 'th' ? 'ระบบ Google Sign-In ไม่พร้อมใช้งานชั่วคราว' : 'Google Sign-In is temporarily unavailable'}</span>
+                        <Button size="sm" variant="flat" onClick={fetchProviders} className="h-7 px-2 text-xs font-bold cursor-pointer">
+                          {lang === 'th' ? 'ลองใหม่' : 'Retry'}
+                        </Button>
+                      </div>
+                    )}
+                    {googleConfig?.enabled && googleSdkFailed && (
+                      <div className="w-full flex items-center justify-between p-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-xs">
+                        <span>{lang === 'th' ? 'โหลด Google Sign-In ไม่สำเร็จ' : 'Failed to load Google Sign-In'}</span>
+                        <Button size="sm" variant="flat" onClick={retryGoogleSdk} className="h-7 px-2 text-xs font-bold cursor-pointer">
+                          {lang === 'th' ? 'ลองใหม่' : 'Retry'}
+                        </Button>
+                      </div>
+                    )}
+                    {mockLoginEnabled && (
+                      <Button
+                        type="button"
+                        variant="light"
+                        size="sm"
+                        onClick={() => handleGoogleLoginResponse({ credential: 'mock' })}
+                        className="text-[10px] text-slate-400 dark:text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400"
+                      >
+                        {t.mockLoginNotice}
+                      </Button>
+                    )}
+                  </div>
 
-              {/* Separator */}
-              <div className="flex items-center text-center my-6">
-                <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
-                <span className="px-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
-                  {activeTab === 'login' ? t.orEmailLogin : t.orEmailSignup}
-                </span>
-                <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
-              </div>
+                  {/* Separator */}
+                  <div className="flex items-center text-center my-6">
+                    <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
+                    <span className="px-4 text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">
+                      {activeTab === 'login' ? t.orEmailLogin : t.orEmailSignup}
+                    </span>
+                    <div className="flex-1 border-t border-slate-200 dark:border-slate-800"></div>
+                  </div>
+                </>
+              )}
 
               {/* Form inputs */}
               <form onSubmit={handleCredentialsSubmit} className="flex flex-col gap-4">

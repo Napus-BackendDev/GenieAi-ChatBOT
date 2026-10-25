@@ -41,6 +41,14 @@ def _post_login(payload: dict):
     return _loop().run_until_complete(go())
 
 
+def _post_signup(payload: dict):
+    async def go():
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            return await c.post("/api/auth/signup", json=payload)
+    return _loop().run_until_complete(go())
+
+
 def test_forged_token_with_old_public_constant_is_rejected():
     """A token signed with the removed public constant must NOT authenticate."""
     now = datetime.now(timezone.utc)
@@ -94,7 +102,7 @@ def test_signup_then_login_password_works_and_wrong_fails():
     email = "freshsignup@test.com"
     _save_users([u for u in _load_users() if u.get("email") != email])
     try:
-        r = _post_login({"provider": "credentials", "email": email, "password": "goodpass1"})
+        r = _post_signup({"provider": "credentials", "email": email, "password": "goodpass1"})
         assert r.status_code == 200 and r.json().get("access_token")
         assert _post_login({"provider": "credentials", "email": email, "password": "goodpass1"}).status_code == 200
         assert _post_login({"provider": "credentials", "email": email, "password": "WRONG"}).status_code == 401

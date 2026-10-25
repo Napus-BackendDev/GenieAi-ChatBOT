@@ -2,6 +2,14 @@ import { lazy, Suspense, useState, useEffect, useRef } from 'react';
 import { Sun, Moon, Bell, Search, Menu } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import { InputGroup } from '@heroui/react';
+import {
+  installTenantContextInterceptor,
+  broadcastSessionEvent,
+  subscribeToSessionEvents,
+  clearTenantMemory,
+  setTenantContext,
+} from './lib/sessionSync';
+import { parseApiJson } from './lib/apiResponse';
 
 const AuthPage = lazy(() => import('./pages/AuthPage'));
 const OnboardingUpload = lazy(() => import('./pages/OnboardingUpload'));
@@ -41,6 +49,7 @@ function App() {
   const [authInitialTab, setAuthInitialTab] = useState('login');
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
+  const [serviceUnavailable, setServiceUnavailable] = useState(false);
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('genie_ai_theme');
     if (!saved || saved === 'default') return 'light';
@@ -214,18 +223,7 @@ function App() {
   // the token's (403 on mismatch). Deriving tenant_id from the token — rather than a
   // possibly-stale stored user object — guarantees they always agree (e.g. after
   // switching accounts without a full reload).
-  const reconcileTenant = (u) => {
-    if (!u) return u;
-    try {
-      const token = readAuthValue('genie_ai_token');
-      if (!token) return u;
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-      if (payload?.sub && payload.sub !== u.tenant_id) {
-        return { ...u, tenant_id: payload.sub };
-      }
-    } catch { /* malformed token — keep the stored tenant_id */ }
-    return u;
-  };
+  const reconcileTenant = (u) => u;
 
   // Safe JSON fetch: tolerates an empty body or a backend that is briefly down,
   // returning `fallback` instead of throwing, so onboarding routing never crashes.
@@ -268,18 +266,30 @@ function App() {
     }
 
     try {
-      const profile = await fetchJsonSafe(`/api/tenant/profile/${currentUser.tenant_id}`, null);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      let res;
+      try {
+        res = await fetch(`/api/tenant/profile/${currentUser.tenant_id}`, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
-      // Route on the explicit onboarding_completed flag (set when the owner
-      // confirms their profile). Backward-compat: legacy accounts that finished
-      // onboarding before the flag existed are recognized by a saved company_name.
-      // NOTE: we intentionally do NOT require docs here — an account that has
-      // completed onboarding must reach the dashboard even if its docs were
-      // removed, and an incomplete account (docs but no confirmation, e.g. an
-      // interrupted signup) correctly stays in onboarding.
-      const onboardingDone = profile
-        ? Boolean(profile.onboarding_completed || profile.company_name)
-        : path !== 'onboarding';
+      if (!res.ok) {
+        if (res.status === 404) {
+          setIsNewUser(true);
+          setOnboardingState('onboard_upload');
+          setLoading(false);
+          return;
+        }
+        console.warn(`Profile load returned HTTP ${res.status}; service unavailable.`);
+        setServiceUnavailable(true);
+        setLoading(false);
+        return;
+      }
+
+      const profile = await parseApiJson(res, 'Profile unavailable');
+      const onboardingDone = Boolean(profile.onboarding_completed || profile.company_name);
 
       setIsNewUser(!onboardingDone);
 
@@ -298,40 +308,84 @@ function App() {
       }
     } catch (e) {
       console.error("Error verifying onboarding state:", e);
-      setOnboardingState('onboard_upload');
+      setServiceUnavailable(true);
     } finally {
       setLoading(false);
     }
   };
 
-  // Restore either a persistent login or this tab's session login.
-  useEffect(() => {
-    let cancelled = false;
-    const restoreSession = async () => {
-      const savedUser = readAuthValue('genie_ai_user');
-      let cachedUser = null;
+  const restoreSession = async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      let res;
       try {
-        cachedUser = savedUser ? reconcileTenant(JSON.parse(savedUser)) : null;
-      } catch {
-        clearAuth();
+        res = await fetch('/api/auth/session', { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
       }
 
-      const serverUser = await fetchJsonSafe('/api/auth/session', null);
-      if (cancelled) return;
-      const currentUser = serverUser?.tenant_id ? serverUser : null;
-      if (currentUser) {
-        setUser(currentUser);
-        checkUserOnboardingStatus(currentUser);
-      } else if (cachedUser && readAuthValue('genie_ai_user')) {
-        // A legacy local-only session is not trusted for routing. Remove it.
+      if (res.ok) {
+        const serverUser = await parseApiJson(res, 'Session unavailable');
+        if (serverUser?.tenant_id) {
+          setUser(serverUser);
+          setTenantContext(serverUser.tenant_id);
+          authStorage().setItem('genie_ai_user', JSON.stringify(serverUser));
+          setServiceUnavailable(false);
+          checkUserOnboardingStatus(serverUser);
+          return;
+        }
+      } else if (res.status === 401) {
+        // Explicit 401: clear local state and return to auth
         clearAuth();
+        clearTenantMemory();
+        setUser(null);
+        setServiceUnavailable(false);
         setLoading(false);
+        return;
+      } else if (res.status === 503) {
+        console.warn("Auth session returned 503; backend unavailable.");
+        setServiceUnavailable(true);
+        setLoading(false);
+        return;
       } else {
+        setServiceUnavailable(true);
         setLoading(false);
+        return;
       }
-    };
+    } catch (err) {
+      console.warn("Failed to reach /api/auth/session or parse response:", err);
+      setServiceUnavailable(true);
+      setLoading(false);
+      return;
+    }
+
+    clearAuth();
+    clearTenantMemory();
+    setUser(null);
+    setServiceUnavailable(false);
+    setLoading(false);
+  };
+
+  // Restore session on mount and listen to cross-tab auth events
+  useEffect(() => {
+    installTenantContextInterceptor(() => {
+      restoreSession();
+    });
+
+    const unsubscribe = subscribeToSessionEvents((evt) => {
+      if (evt.type === 'LOGOUT') {
+        clearAuth();
+        clearTenantMemory();
+        setUser(null);
+        setOnboardingState('auth');
+      } else if (evt.type === 'LOGIN' || evt.type === 'TENANT_CHANGED') {
+        restoreSession();
+      }
+    });
+
     restoreSession();
-    return () => { cancelled = true; };
+    return () => unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -344,15 +398,14 @@ function App() {
   }, [user, onboardingState]);
 
   const handleAuthSuccess = (authenticatedUser, keepLoggedIn = true) => {
-    // The backend stores the JWT in an HttpOnly cookie. Only cache non-secret UI
-    // identity locally so JavaScript never persists administrator credentials.
     clearAuth();
     const storage = keepLoggedIn ? localStorage : sessionStorage;
-    const reconciled = reconcileTenant(authenticatedUser);
-    setUser(reconciled);
-    storage.setItem('genie_ai_user', JSON.stringify(reconciled));
+    setUser(authenticatedUser);
+    setTenantContext(authenticatedUser.tenant_id);
+    storage.setItem('genie_ai_user', JSON.stringify(authenticatedUser));
+    broadcastSessionEvent('LOGIN', { tenant_id: authenticatedUser.tenant_id });
     setLoading(true);
-    checkUserOnboardingStatus(reconciled);
+    checkUserOnboardingStatus(authenticatedUser);
   };
 
   const handleOnboardingComplete = (profile) => {
@@ -368,8 +421,17 @@ function App() {
   };
 
   const handleLogout = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    try {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      if (!res.ok && res.status !== 401) {
+        console.warn("Logout token revocation failed on server:", res.status);
+      }
+    } catch (err) {
+      console.warn("Logout error:", err);
+    }
     clearAuth();
+    clearTenantMemory();
+    broadcastSessionEvent('LOGOUT');
     setUser(null);
     setOnboardingState('auth');
     setActiveTab('overview');
@@ -378,6 +440,37 @@ function App() {
   const triggerReupload = () => {
     setOnboardingState('onboard_upload');
   };
+
+  if (serviceUnavailable) {
+    return (
+      <div className="flex items-center justify-center min-h-screen text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-950 p-6">
+        <div className="max-w-md w-full text-center p-8 bg-white dark:bg-slate-900 rounded-3xl border border-amber-500/20 shadow-xl">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-amber-500/10 flex items-center justify-center text-3xl">
+            ⚠️
+          </div>
+          <h2 className="text-xl font-extrabold text-slate-900 dark:text-white mb-2">
+            {lang === 'th' ? 'ระบบไม่พร้อมใช้งานชั่วคราว' : 'Service Temporarily Unavailable'}
+          </h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 leading-relaxed">
+            {lang === 'th'
+              ? 'ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ในขณะนี้ กรุณารอสักครู่แล้วลองใหม่อีกครั้ง'
+              : 'Unable to connect to the server right now. Please wait a moment and try again.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setServiceUnavailable(false);
+              restoreSession();
+            }}
+            className="w-full h-11 px-6 font-bold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:opacity-90 transition-opacity cursor-pointer shadow-lg shadow-cyan-500/20"
+          >
+            {lang === 'th' ? 'ลองใหม่อีกครั้ง' : 'Retry'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

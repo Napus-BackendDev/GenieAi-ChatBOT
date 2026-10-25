@@ -206,9 +206,17 @@ def test_login_credentials_returns_access_token(client, monkeypatch, tmp_path):
     users_file = tmp_path / "users.json"
     monkeypatch.setattr(auth_router, "USERS_FILE_PATH", str(users_file))
 
-    # Fresh email + password -> new sign-up, must return a bearer token and
-    # must NOT leak password_hash. No auth header: /login stays UNauthenticated.
-    r = client.post("/api/auth/login", json={
+    # Unregistered email -> /login fails (no auto-signup)
+    unregistered = client.post("/api/auth/login", json={
+        "provider": "credentials",
+        "email": "brandnew@example.com",
+        "password": "hunter2",
+    })
+    assert unregistered.status_code == 401
+
+    # Fresh email + password -> new sign-up via /api/auth/signup, must return a bearer token and
+    # must NOT leak password_hash.
+    r = client.post("/api/auth/signup", json={
         "provider": "credentials",
         "email": "brandnew@example.com",
         "password": "hunter2",

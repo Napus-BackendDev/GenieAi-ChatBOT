@@ -134,6 +134,9 @@ class TenantProfile(BaseModel):
     # The Messenger Page ID this tenant owns — used to route incoming Facebook
     # webhook events (entry.id) to the correct tenant instead of a global default.
     facebook_page_id: str = ""
+    line_bot_user_id: str = ""
+    line_credential_fingerprint: str = ""
+    facebook_credential_fingerprint: str = ""
     webchat_settings: WebchatSettings = WebchatSettings()
     ai_settings: AISettings = AISettings()
     booking_settings: BookingSettings = BookingSettings()
@@ -171,19 +174,31 @@ async def get_profile(tenant_id: str = Depends(require_tenant)):
         raise HTTPException(status_code=500, detail="Failed to load tenant profile.")
 
     # Compute configuration booleans from the (still-present) secret values.
+    import hashlib
+    stored_line_fp = str(data.get("line_credential_fingerprint") or "").strip()
+    line_token = str(data.get("line_channel_access_token") or "").strip()
+    expected_line_fp = hashlib.sha256(line_token.encode("utf-8")).hexdigest() if line_token else ""
+
     line_credentials_present = bool(
-        str(data.get("line_channel_access_token") or "").strip()
+        line_token
         and str(data.get("line_channel_secret") or "").strip()
     )
     line_enabled = bool(
         data.get("line_verified")
         and line_credentials_present
+        and (not stored_line_fp or stored_line_fp == expected_line_fp)
     )
-    facebook_credentials_present = bool(str(data.get("facebook_page_access_token") or "").strip())
+
+    stored_fb_fp = str(data.get("facebook_credential_fingerprint") or "").strip()
+    fb_token = str(data.get("facebook_page_access_token") or "").strip()
+    fb_page_id = str(data.get("facebook_page_id") or "").strip()
+    expected_fb_fp = hashlib.sha256(f"{fb_page_id}:{fb_token}".encode("utf-8")).hexdigest() if (fb_token and fb_page_id) else ""
+
+    facebook_credentials_present = bool(fb_token and fb_page_id)
     facebook_enabled = bool(
         data.get("facebook_verified")
         and facebook_credentials_present
-        and str(data.get("facebook_page_id") or "").strip()
+        and (not stored_fb_fp or stored_fb_fp == expected_fb_fp)
     )
 
     # Strip secrets before returning.
@@ -217,19 +232,45 @@ async def save_profile(
         # Load existing data
         existing_data = await db_load_profile(tenant_id)
 
+        SERVER_MANAGED_FIELDS = {
+            "line_verified", "facebook_verified",
+            "line_bot_user_id", "line_credential_fingerprint",
+            "facebook_credential_fingerprint"
+        }
+
+        # Validate Facebook Page ID uniqueness if provided
+        if "facebook_page_id" in explicit_fields:
+            new_pid = str(profile_dict.get("facebook_page_id") or "").strip()
+            if new_pid and new_pid != str(existing_data.get("facebook_page_id") or "").strip():
+                from app.core.db import db_resolve_tenant_by_fb_page_id
+                owner = await db_resolve_tenant_by_fb_page_id(new_pid)
+                if owner and owner != tenant_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This Facebook Page ID is already assigned to another account.",
+                    )
+
         # Merge explicitly set fields from incoming request into existing_data.
-        # For the four secret fields, an empty/absent value means 'unchanged' —
-        # only overwrite when a non-empty value is provided. This is critical
-        # because GET no longer returns secrets, so the SettingsPage POSTs ''
-        # for them and that must NOT wipe the stored token/secret.
         for field in TenantProfile.model_fields.keys():
-            if field not in explicit_fields or field == "facebook_verified":
+            if field not in explicit_fields or field in SERVER_MANAGED_FIELDS:
                 continue
             value = profile_dict[field]
             if field in SECRET_FIELDS and not str(value or "").strip():
                 # Preserve existing secret; empty incoming value = unchanged.
                 logger.info(f"Preserving existing secret field '{field}' (empty incoming value).")
                 continue
+
+            # Invalidate verification if credentials change
+            if field == "line_channel_access_token" and str(value or "").strip() != str(existing_data.get(field) or "").strip():
+                existing_data["line_verified"] = False
+                existing_data["line_bot_user_id"] = ""
+                existing_data["line_credential_fingerprint"] = ""
+            elif field == "line_channel_secret" and str(value or "").strip() != str(existing_data.get(field) or "").strip():
+                existing_data["line_verified"] = False
+            elif field in {"facebook_page_access_token", "facebook_page_id"} and str(value or "").strip() != str(existing_data.get(field) or "").strip():
+                existing_data["facebook_verified"] = False
+                existing_data["facebook_credential_fingerprint"] = ""
+
             existing_data[field] = value
             if field in SECRET_FIELDS:
                 logger.info(f"Updating secret field '{field}' in tenant profile.")
@@ -353,7 +394,11 @@ async def verify_line(
                 logger.warning(f"Could not read tenant profile for LINE verify: {read_err}")
 
     if not access_token:
-        await _save_profile_field(tenant_id, "line_verified", False)
+        await _save_profile_fields(tenant_id, {
+            "line_verified": False,
+            "line_bot_user_id": "",
+            "line_credential_fingerprint": "",
+        })
         return {"valid": False, "error": "ยังไม่ได้ใส่ Channel Access Token"}
 
     headers = {"Authorization": f"Bearer {access_token}"}
@@ -362,17 +407,43 @@ async def verify_line(
             response = await client.get(LINE_BOT_INFO_URL, headers=headers, timeout=5.0)
         if response.status_code == 200:
             data = response.json()
-            await _save_profile_field(tenant_id, "line_verified", True)
+            bot_user_id = str(data.get("userId") or "").strip()
+            if bot_user_id:
+                from app.core.db import db_resolve_tenant_by_line_bot_id
+                existing_owner = await db_resolve_tenant_by_line_bot_id(bot_user_id)
+                if existing_owner and existing_owner != tenant_id:
+                    logger.warning(f"LINE bot {bot_user_id} already belongs to tenant {existing_owner}")
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This LINE bot is already connected to another account.",
+                    )
+            import hashlib
+            fp = hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+            updates = {
+                "line_verified": True,
+                "line_bot_user_id": bot_user_id,
+                "line_credential_fingerprint": fp,
+            }
+            if body and body.access_token and body.access_token.strip():
+                updates["line_channel_access_token"] = access_token
+            await _save_profile_fields(tenant_id, updates)
             return {
                 "valid": True,
                 "bot_name": data.get("displayName", ""),
                 "picture_url": data.get("pictureUrl") or "",
+                "bot_user_id": bot_user_id,
             }
         logger.info(f"LINE verify failed for tenant {tenant_id}: HTTP {response.status_code}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"LINE verify error for tenant {tenant_id}: {e}")
 
-    await _save_profile_field(tenant_id, "line_verified", False)
+    await _save_profile_fields(tenant_id, {
+        "line_verified": False,
+        "line_bot_user_id": "",
+        "line_credential_fingerprint": "",
+    })
     return {"valid": False, "error": "โทเคนไม่ถูกต้องหรือหมดอายุ"}
 
 
@@ -389,8 +460,20 @@ async def verify_facebook(
     access_token = (body.access_token if body else "").strip() or str(profile.get("facebook_page_access_token") or "").strip()
     page_id = (body.page_id if body else "").strip() or str(profile.get("facebook_page_id") or "").strip()
     if not access_token or not page_id:
-        await _save_profile_field(tenant_id, "facebook_verified", False)
+        await _save_profile_fields(tenant_id, {
+            "facebook_verified": False,
+            "facebook_credential_fingerprint": "",
+        })
         return {"valid": False, "error": "ต้องระบุ Page Access Token และ Page ID"}
+
+    from app.core.db import db_resolve_tenant_by_fb_page_id
+    existing_owner = await db_resolve_tenant_by_fb_page_id(page_id)
+    if existing_owner and existing_owner != tenant_id:
+        raise HTTPException(
+            status_code=409,
+            detail="This Facebook Page ID is already assigned to another account.",
+        )
+
     try:
         graph_version = os.getenv("FB_GRAPH_API_VERSION", "v21.0")
         async with httpx.AsyncClient() as client:
@@ -403,21 +486,44 @@ async def verify_facebook(
     except Exception as exc:
         logger.warning("Facebook credential verification failed: %s", type(exc).__name__)
         verified = False
-    await _save_profile_field(tenant_id, "facebook_verified", verified)
+
     if not verified:
+        await _save_profile_fields(tenant_id, {
+            "facebook_verified": False,
+            "facebook_credential_fingerprint": "",
+        })
         return {"valid": False, "error": "Page credential หรือ Page ID ไม่ถูกต้อง"}
+
+    import hashlib
+    fp = hashlib.sha256(f"{page_id}:{access_token}".encode("utf-8")).hexdigest()
+    updates = {
+        "facebook_verified": True,
+        "facebook_page_id": page_id,
+        "facebook_credential_fingerprint": fp,
+    }
+    if body and body.access_token and body.access_token.strip():
+        updates["facebook_page_access_token"] = access_token
+    await _save_profile_fields(tenant_id, updates)
     return {"valid": True, "page_id": page_id}
 
 
-async def _save_profile_field(tenant_id: str, field_name: str, field_value) -> None:
-    # Load existing profile
+async def _save_profile_fields(tenant_id: str, fields: dict) -> None:
     raw = await db_load_profile(tenant_id) or {}
-    
-    # Update field
-    raw[field_name] = field_value
-    
-    # Save back
+    raw.update(fields)
     await db_save_profile(tenant_id, raw)
+
+    from app.core.redis import get_redis
+    try:
+        redis_client = get_redis()
+        cache_key = f"tenant_cag_profile:{tenant_id}"
+        await redis_client.delete(cache_key)
+        logger.info(f"Invalidated Redis CAG profile cache for tenant '{tenant_id}'.")
+    except Exception as cache_err:
+        logger.warning(f"Failed to clear Redis CAG profile cache: {cache_err}")
+
+
+async def _save_profile_field(tenant_id: str, field_name: str, field_value) -> None:
+    await _save_profile_fields(tenant_id, {field_name: field_value})
     
     # Clear Redis Cache
     from app.core.redis import get_redis
@@ -568,6 +674,7 @@ class SettingsResponse(BaseModel):
     line_verified: bool = False
     line_configured: bool = False
     line_enabled: bool = False
+    line_bot_user_id: str = ""
     facebook_configured: bool = False
     facebook_enabled: bool = False
     facebook_verified: bool = False
@@ -592,24 +699,36 @@ async def get_settings(
         "company_name", "business_hours", "contact_number", "webhook_domain",
         "webchat_settings", "ai_settings", "booking_settings",
         "timezone", "conversation_retention_days",
-        "line_channel_access_token", "line_channel_secret", "line_verified",
+        "line_channel_access_token", "line_channel_secret", "line_verified", "line_bot_user_id",
         "facebook_page_access_token", "facebook_verify_token", "facebook_page_id", "facebook_verified"
     ]
     res = {k: data.get(k) for k in settings_keys}
     
+    import hashlib
+    stored_line_fp = str(data.get("line_credential_fingerprint") or "").strip()
+    line_token = str(res.get("line_channel_access_token") or "").strip()
+    expected_line_fp = hashlib.sha256(line_token.encode("utf-8")).hexdigest() if line_token else ""
+
     res["line_configured"] = bool(
-        str(res.get("line_channel_access_token") or "").strip()
+        line_token
         and str(res.get("line_channel_secret") or "").strip()
     )
     res["line_enabled"] = bool(
         res.get("line_verified")
         and res["line_configured"]
+        and (not stored_line_fp or stored_line_fp == expected_line_fp)
     )
-    res["facebook_configured"] = bool(str(res.get("facebook_page_access_token") or "").strip())
+
+    stored_fb_fp = str(data.get("facebook_credential_fingerprint") or "").strip()
+    fb_token = str(res.get("facebook_page_access_token") or "").strip()
+    fb_page_id = str(res.get("facebook_page_id") or "").strip()
+    expected_fb_fp = hashlib.sha256(f"{fb_page_id}:{fb_token}".encode("utf-8")).hexdigest() if (fb_token and fb_page_id) else ""
+
+    res["facebook_configured"] = bool(fb_token and fb_page_id)
     res["facebook_enabled"] = bool(
         res.get("facebook_verified")
         and res["facebook_configured"]
-        and str(res.get("facebook_page_id") or "").strip()
+        and (not stored_fb_fp or stored_fb_fp == expected_fb_fp)
     )
     res["webchat_config"] = {
         "token": create_webchat_token(
@@ -680,17 +799,30 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
                 detail="This Facebook Page ID is already assigned to another account.",
             )
     
+    SERVER_MANAGED_FIELDS = {
+        "line_verified", "facebook_verified",
+        "line_bot_user_id", "line_credential_fingerprint",
+        "facebook_credential_fingerprint",
+    }
+
     for field in SettingsUpdateRequest.model_fields.keys():
-        if field not in explicit_fields:
+        if field not in explicit_fields or field in SERVER_MANAGED_FIELDS:
             continue
         val = body_dict[field]
         if field in SECRET_FIELDS and not str(val or "").strip():
             continue
+        old_val = str(raw.get(field) or "").strip()
+        new_val = str(val or "").strip()
         raw[field] = val
-        if field == "line_channel_access_token":
+        if field == "line_channel_access_token" and new_val != old_val:
             raw["line_verified"] = False
-        if field in {"facebook_page_access_token", "facebook_page_id"}:
+            raw["line_bot_user_id"] = ""
+            raw["line_credential_fingerprint"] = ""
+        elif field == "line_channel_secret" and new_val != old_val:
+            raw["line_verified"] = False
+        elif field in {"facebook_page_access_token", "facebook_page_id"} and new_val != old_val:
             raw["facebook_verified"] = False
+            raw["facebook_credential_fingerprint"] = ""
         
     await db_save_profile(tenant_id, raw)
     

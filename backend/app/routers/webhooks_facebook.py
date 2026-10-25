@@ -209,6 +209,11 @@ async def facebook_webhook(
         if not tenant_id:
             logger.warning("Facebook page %s is not mapped; event quarantined.", page_id)
             continue
+        from app.core.db import db_get_user_by_tenant
+        tenant_user = await db_get_user_by_tenant(tenant_id)
+        if tenant_user and tenant_user.get("status", "active") != "active":
+            logger.warning("Ignoring Facebook webhook for inactive tenant %s (%s)", tenant_id, tenant_user.get("status"))
+            continue
         if is_mongo_connected():
             from app.services.webhook_queue import enqueue_webhook_event
             await enqueue_webhook_event(
