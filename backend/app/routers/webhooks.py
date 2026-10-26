@@ -284,8 +284,8 @@ async def get_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
         from app.core.db import db_load_profile
         profile = await db_load_profile(tenant_id)
         if profile:
-            token = profile.get("line_channel_access_token")
-            secret = profile.get("line_channel_secret")
+            token = str(profile.get("line_channel_access_token") or "").strip()
+            secret = str(profile.get("line_channel_secret") or "").strip()
             if token and secret and (profile.get("line_verified") or not settings.is_production):
                 return token, secret
     except Exception as e:
@@ -306,8 +306,8 @@ async def get_strict_tenant_line_credentials(tenant_id: str) -> tuple[str, str]:
         from app.core.db import db_load_profile
         profile = await db_load_profile(tenant_id)
         if profile:
-            token = profile.get("line_channel_access_token")
-            secret = profile.get("line_channel_secret")
+            token = str(profile.get("line_channel_access_token") or "").strip()
+            secret = str(profile.get("line_channel_secret") or "").strip()
             if token and secret and (profile.get("line_verified") or not settings.is_production):
                 return token, secret
     except Exception as e:
@@ -659,7 +659,10 @@ async def line_webhook_tenant(
 
     # Verify request signature using tenant-specific secret
     if not verify_line_signature(body, x_line_signature, channel_secret=secret):
-        logger.warning(f"Received invalid X-Line-Signature for tenant {tenant_id}. Rejecting request.")
+        logger.warning(
+            "Received invalid X-Line-Signature for tenant %s (stored secret: %d chars, hex=%s, header present=%s). Rejecting request.",
+            tenant_id, len(secret), bool(re.fullmatch(r"[0-9a-fA-F]{32}", secret)), bool(x_line_signature),
+        )
         raise HTTPException(status_code=403, detail="Invalid signature")
 
     try:

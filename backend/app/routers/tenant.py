@@ -809,8 +809,16 @@ async def update_settings(tenant_id: str, body: SettingsUpdateRequest, current_t
         if field not in explicit_fields or field in SERVER_MANAGED_FIELDS:
             continue
         val = body_dict[field]
-        if field in SECRET_FIELDS and not str(val or "").strip():
-            continue
+        if field in SECRET_FIELDS:
+            # Pasted credentials often carry spaces/newlines; a padded secret makes every LINE signature fail (403).
+            val = str(val or "").strip()
+            if not val:
+                continue
+        if field == "line_channel_secret" and not re.fullmatch(r"[0-9a-fA-F]{32}", val):
+            raise HTTPException(
+                status_code=422,
+                detail="Channel secret ของ LINE ต้องเป็นตัวอักษร 32 ตัว (0-9, a-f) จากแท็บ Basic settings — ไม่ใช่ Channel access token",
+            )
         old_val = str(raw.get(field) or "").strip()
         new_val = str(val or "").strip()
         raw[field] = val

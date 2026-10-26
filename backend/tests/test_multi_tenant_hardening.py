@@ -344,3 +344,36 @@ def test_google_jwks_outage_returns_503(client, monkeypatch):
     )
     assert res.status_code == 503
     assert "unavailable" in res.json()["detail"].lower()
+
+
+def test_line_channel_secret_is_trimmed_and_format_checked(client):
+    token = create_access_token("tenant-alpha", "alpha@example.com", session_version=1)
+    headers = {"Authorization": f"Bearer {token}"}
+    secret = "0123456789abcdef0123456789abcdef"
+
+    bad = client.post("/api/tenant/profile/tenant-alpha/settings", headers=headers, json={"line_channel_secret": "not-a-real-secret"})
+    assert bad.status_code == 422
+
+    ok = client.post("/api/tenant/profile/tenant-alpha/settings", headers=headers, json={"line_channel_secret": f"  {secret}\n"})
+    assert ok.status_code == 200
+    stored = asyncio.get_event_loop().run_until_complete(db_load_profile("tenant-alpha"))
+    assert stored["line_channel_secret"] == secret
+
+
+def test_line_webhook_accepts_signature_when_stored_secret_has_padding(client):
+    """Credentials saved before trimming existed must keep working (LINE 'Verify' returned 403 for them)."""
+    import base64
+    import hmac as _hmac
+
+    secret = "fedcba9876543210fedcba9876543210"
+
+    async def _setup():
+        profile = await db_load_profile("tenant-beta") or {}
+        profile.update(line_channel_secret=f" {secret} ", line_channel_access_token="tok", line_verified=True)
+        await db_save_profile("tenant-beta", profile)
+
+    asyncio.get_event_loop().run_until_complete(_setup())
+    body = json.dumps({"destination": "Ubeta", "events": []}).encode()
+    sig = base64.b64encode(_hmac.new(secret.encode(), body, hashlib.sha256).digest()).decode()
+    res = client.post("/api/webhooks/line/tenant-beta", headers={"X-Line-Signature": sig, "content-type": "application/json"}, content=body)
+    assert res.status_code == 200, res.text
