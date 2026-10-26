@@ -79,47 +79,53 @@ async def parse_pdf(file_path: str, tenant_id: str = "default") -> dict:
             raise ValueError(f"PDF page {page_number} is too large to render safely")
         logger.info(f"Processing PDF page {page_number}/{total_pages}")
 
-        # 1. Visual OCR using GPT-4o-mini Vision
+        # 1. Prefer the PDF's own embedded text: it is exact, free, and Vision OCR was observed to
+        # mis-read Thai service names (e.g. "รักษารากฟัน" -> "รักษาฟันผุ"). Only scanned/garbled
+        # pages (little or broken text) go to Vision OCR.
         text = ""
-        try:
-            # Render page to PNG image bytes (150 DPI is good for text legibility)
-            pix = page.get_pixmap(dpi=150)
-            img_bytes = pix.tobytes("png")
+        native = page.get_text().strip()
+        if len(native) >= 80 and native.count("�") <= len(native) * 0.02 and "(cid:" not in native:
+            text = native
+        if not text:
+            try:
+                # Render page to PNG image bytes (150 DPI is good for text legibility)
+                pix = page.get_pixmap(dpi=150)
+                img_bytes = pix.tobytes("png")
 
-            # Encode to base64
-            base64_image = base64.b64encode(img_bytes).decode("utf-8")
+                # Encode to base64
+                base64_image = base64.b64encode(img_bytes).decode("utf-8")
 
-            # Call Vision only through the budgeted provider wrapper. Mock/local
-            # mode returns empty text and uses PyMuPDF fallback below.
-            logger.info(f"Calling GPT-4o-mini Vision OCR for page {page_number}")
-            text = await extract_page_text_with_vision(
-                base64_image,
-                tenant_id,
-                (
-                    "Extract all text, structures, and tables from this document page image.\n"
-                    "Return the exact text and tables formatted as markdown. Do not add any conversational text "
-                    "or wrap the response in markdown code block markers. Respond in the native language "
-                    "of the document (typically Thai or English)."
-                ),
-            )
-            if not text:
+                # Call Vision only through the budgeted provider wrapper. Mock/local
+                # mode returns empty text and uses PyMuPDF fallback below.
+                logger.info(f"Calling GPT-4o-mini Vision OCR for page {page_number}")
+                text = await extract_page_text_with_vision(
+                    base64_image,
+                    tenant_id,
+                    (
+                        "Extract all text, structures, and tables from this document page image.\n"
+                        "Return the exact text and tables formatted as markdown. Do not add any conversational text "
+                        "or wrap the response in markdown code block markers. Respond in the native language "
+                        "of the document (typically Thai or English)."
+                    ),
+                )
+                if not text:
+                    text = page.get_text()
+
+                # Clean up markdown code blocks if the model wrapped it anyway
+                if text.startswith("```"):
+                    lines = text.splitlines()
+                    if lines[0].startswith("```"):
+                        lines = lines[1:]
+                    if lines and lines[-1].strip() == "```":
+                        lines = lines[:-1]
+                    text = "\n".join(lines).strip()
+
+                logger.info(f"Successfully performed GPT-4o-mini Vision OCR for page {page_number}")
+
+            except Exception as e:
+                logger.error(f"Failed GPT-4o-mini Vision OCR for page {page_number}: {e}. Falling back to PyMuPDF text extraction.")
+                # Fallback to PyMuPDF rule-based text extraction
                 text = page.get_text()
-
-            # Clean up markdown code blocks if the model wrapped it anyway
-            if text.startswith("```"):
-                lines = text.splitlines()
-                if lines[0].startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                text = "\n".join(lines).strip()
-
-            logger.info(f"Successfully performed GPT-4o-mini Vision OCR for page {page_number}")
-
-        except Exception as e:
-            logger.error(f"Failed GPT-4o-mini Vision OCR for page {page_number}: {e}. Falling back to PyMuPDF text extraction.")
-            # Fallback to PyMuPDF rule-based text extraction
-            text = page.get_text()
 
         # 2. Extract embedded images
         image_urls = []
