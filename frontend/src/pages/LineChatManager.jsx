@@ -349,6 +349,7 @@ const LineChatManager = ({ tenantId, lang }) => {
                       alt={session.name}
                       className="w-11 h-11 rounded-full object-cover border border-slate-100 dark:border-white/10"
                       onError={(e) => {
+                        e.currentTarget.onerror = null;
                         e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${session.id}`;
                       }}
                     />
@@ -397,6 +398,7 @@ const LineChatManager = ({ tenantId, lang }) => {
                 alt={selectedSession.name}
                 className="w-9 h-9 rounded-full object-cover border border-slate-100 dark:border-white/10"
                 onError={(e) => {
+                  e.currentTarget.onerror = null;
                   e.currentTarget.src = `https://api.dicebear.com/7.x/bottts/svg?seed=${selectedSession.id}`;
                 }}
               />
