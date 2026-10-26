@@ -121,24 +121,63 @@ def test_login_never_creates_unknown_accounts(client):
     assert not any(u["email"] == "nonexistent@example.com" for u in users)
 
 
-def test_account_link_required_when_google_matches_password_user(client, monkeypatch):
+def test_google_login_links_existing_password_account_without_password_prompt(client, monkeypatch):
+    """Verified Google e-mail == proof of ownership: log straight in, no password step.
+
+    The password is dropped and session_version bumped so a pre-registered password can't survive.
+    """
     from app.routers import auth as auth_module
 
     async def mock_verify_google(token):
-        return {
-            "sub": "new-google-sub-for-alpha",
-            "email": "alpha@example.com",
-            "name": "Alpha Owner",
-        }
+        return {"sub": "new-google-sub-for-alpha", "email": "alpha@example.com", "name": "Alpha Owner"}
 
     monkeypatch.setattr(auth_module, "verify_google_token", mock_verify_google)
 
+    res = client.post("/api/auth/login", json={"provider": "google", "token": "fake-google-token"})
+    assert res.status_code == 200
+    assert res.json()["tenant_id"] == "tenant-alpha"
+
+    user = next(u for u in asyncio.get_event_loop().run_until_complete(db_load_users()) if u["tenant_id"] == "tenant-alpha")
+    assert user["google_sub"] == "new-google-sub-for-alpha"
+    assert not user.get("password_hash")
+    assert user["session_version"] == 2  # was 1: old sessions are revoked
+
+    # second Google login is the plain returning-user path
+    res2 = client.post("/api/auth/login", json={"provider": "google", "token": "fake-google-token"})
+    assert res2.status_code == 200 and res2.json()["tenant_id"] == "tenant-alpha"
+
+
+def test_google_login_creates_account_for_unknown_user_and_signup_matches(client, monkeypatch):
+    from app.routers import auth as auth_module
+
+    async def mock_verify_google(token):
+        return {"sub": "brand-new-google-sub", "email": "brandnew-google@example.com", "name": "New Owner"}
+
+    monkeypatch.setattr(auth_module, "verify_google_token", mock_verify_google)
+
+    res = client.post("/api/auth/login", json={"provider": "google", "token": "fake-google-token"})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["tenant_id"].startswith("tenant-google-") and body["is_new"] is True
+    # signing "up" with the same Google account afterwards just logs in too (no 409 dead end)
+    res2 = client.post("/api/auth/signup", json={"provider": "google", "token": "fake-google-token"})
+    assert res2.status_code == 200 and res2.json()["tenant_id"] == body["tenant_id"]
+
+
+def test_public_auth_endpoints_ignore_a_stale_session_cookie(client):
+    """After a JWT_SECRET rotation old cookies are invalid; signup/link-google must not answer 'Invalid or expired token'."""
     res = client.post(
-        "/api/auth/login",
-        json={"provider": "google", "token": "fake-google-token"},
+        "/api/auth/signup",
+        json={"email": "stalecookie@example.com", "password": "securepassword123"},
+        cookies={"genieai_session": "stale.invalid.token"},
     )
-    assert res.status_code == 409
-    assert res.json()["detail"] == "ACCOUNT_LINK_REQUIRED"
+    assert res.status_code == 200, res.text
+    res = client.post(
+        "/api/auth/link-google",
+        json={"email": "alpha@example.com", "password": "x", "google_token": "t"},
+        cookies={"genieai_session": "stale.invalid.token"},
+    )
+    assert res.status_code != 401 or res.json().get("detail") != "Invalid or expired token"
 
 
 def test_x_tenant_context_guard_middleware(client):
@@ -236,15 +275,7 @@ def test_link_google_flow_and_google_token_alias(client, monkeypatch):
 
     monkeypatch.setattr(auth_module, "verify_google_token", mock_verify_google)
 
-    # 1. Login with Google for existing password account yields 409 with email payload
-    res = client.post(
-        "/api/auth/login",
-        json={"provider": "google", "token": "fake-google-token"},
-    )
-    assert res.status_code == 409
-    data = res.json()
-    assert data["code"] == "ACCOUNT_LINK_REQUIRED"
-    assert data["email"] == "alpha@example.com"
+    data = {"email": "alpha@example.com"}
 
     # 2. Complete linking using google_token parameter as sent by frontend
     res_link = client.post(

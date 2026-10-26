@@ -29,6 +29,7 @@ from app.core.db import (
     db_find_user,
     db_create_user,
     db_update_user_fields,
+    db_bump_session_version,
 )
 from app.core.config import settings
 
@@ -288,6 +289,64 @@ async def reauthenticate(
     return {"reauth_token": create_reauth_token(current_tenant), "expires_in": 300}
 
 
+async def _google_continue(email: str, name: str, picture: str, google_sub: str, response: Response, keep_logged_in: bool):
+    """One path for Google sign-in AND sign-up: existing account -> log in, none -> create it.
+
+    verify_google_token already requires email_verified, so a matching e-mail is proof of ownership and
+    an existing password account is linked without asking for the password again. The password is then
+    dropped and session_version bumped: otherwise someone who pre-registered the victim's e-mail with a
+    password they know would keep access after the real owner signs in with Google.
+    """
+    user = await db_find_user(google_sub=google_sub)
+    if not user:
+        existing = await db_find_user(email=email)
+        if existing:
+            if existing.get("status", "active") != "active":
+                raise HTTPException(status_code=403, detail="บัญชีนี้ถูกระงับการใช้งาน")
+            fields = {"google_sub": google_sub, "name": name, "picture": picture}
+            had_password = bool(existing.get("password_hash"))
+            if had_password:
+                fields["password_hash"] = None
+            await db_update_user_fields(existing["tenant_id"], fields)
+            if had_password:
+                await db_bump_session_version(existing["tenant_id"])
+            logger.info("Linked Google identity to existing account by verified e-mail")
+            user = await db_find_user(google_sub=google_sub) or existing
+    if user:
+        if user.get("status", "active") != "active":
+            raise HTTPException(status_code=403, detail="บัญชีนี้ถูกระงับการใช้งาน")
+        await db_update_user_fields(user["tenant_id"], {"name": name, "picture": picture})
+        user["name"], user["picture"] = name, picture
+        return _finalize_login(
+            response,
+            _user_response(user, is_new=not bool(user.get("company_name"))),
+            keep_logged_in,
+        )
+
+    new_user = {
+        "tenant_id": f"tenant-google-{str(uuid.uuid4())[:8]}",
+        "email": email,
+        "email_normalized": normalize_email(email),
+        "contact_email": email,
+        "phone": "",
+        "company_name": "",
+        "business_type": "",
+        "name": name,
+        "picture": picture,
+        "google_sub": google_sub,
+        "status": "active",
+        "session_version": 0,
+    }
+    try:
+        created = await db_create_user(new_user)
+    except Exception:
+        created = await db_find_user(google_sub=google_sub)  # concurrent first sign-in
+        if not created:
+            raise HTTPException(status_code=409, detail="Account already registered")
+    logger.info("Created new Google user account")
+    return _finalize_login(response, _user_response(created, is_new=True), keep_logged_in)
+
+
 @router.post("/login")
 async def login(req: LoginRequest, response: Response, request: Request):
     """
@@ -322,37 +381,7 @@ async def login(req: LoginRequest, response: Response, request: Request):
 
         await _enforce_login_rate_limit(request, email, include_ip=False)
 
-        # 1. Search by google_sub first
-        user = await db_find_user(google_sub=google_sub)
-        if user:
-            if user.get("status", "active") != "active":
-                raise HTTPException(status_code=403, detail="บัญชีนี้ถูกระงับการใช้งาน")
-            await db_update_user_fields(user["tenant_id"], {"name": name, "picture": picture})
-            user["name"] = name
-            user["picture"] = picture
-            return _finalize_login(
-                response,
-                _user_response(user, is_new=not bool(user.get("company_name"))),
-                req.keep_logged_in,
-            )
-
-        # 2. Check if an existing credentials account has this email
-        existing_by_email = await db_find_user(email=email)
-        if existing_by_email:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "code": "ACCOUNT_LINK_REQUIRED",
-                    "detail": "ACCOUNT_LINK_REQUIRED",
-                    "email": email,
-                },
-            )
-
-        # 3. Not registered -> login does not auto-create
-        raise HTTPException(
-            status_code=404,
-            detail="ACCOUNT_NOT_FOUND",
-        )
+        return await _google_continue(email, name, picture, google_sub, response, req.keep_logged_in)
 
     elif provider == "credentials":
         email = normalize_email(req.email)
@@ -462,51 +491,8 @@ async def signup(req: SignupRequest, response: Response, request: Request):
 
         await _enforce_login_rate_limit(request, email, include_ip=False)
 
-        # Check existing by google_sub
-        existing_sub = await db_find_user(google_sub=google_sub)
-        if existing_sub:
-            raise HTTPException(status_code=409, detail="บัญชี Google นี้ลงทะเบียนแล้ว กรุณาเข้าสู่ระบบ")
+        return await _google_continue(email, name, picture, google_sub, response, req.keep_logged_in)
 
-        # Check existing by email
-        existing_email = await db_find_user(email=email)
-        if existing_email:
-            return JSONResponse(
-                status_code=409,
-                content={
-                    "code": "ACCOUNT_LINK_REQUIRED",
-                    "detail": "ACCOUNT_LINK_REQUIRED",
-                    "email": email,
-                },
-            )
-
-        new_tenant_id = f"tenant-google-{str(uuid.uuid4())[:8]}"
-        new_user = {
-            "tenant_id": new_tenant_id,
-            "email": email,
-            "email_normalized": normalize_email(email),
-            "contact_email": email,
-            "phone": "",
-            "company_name": "",
-            "business_type": "",
-            "name": name,
-            "picture": picture,
-            "google_sub": google_sub,
-            "status": "active",
-            "session_version": 0,
-        }
-        try:
-            created = await db_create_user(new_user)
-        except Exception:
-            # Race condition: another concurrent signup completed
-            created = await db_find_user(google_sub=google_sub)
-            if not created:
-                raise HTTPException(status_code=409, detail="Account already registered")
-        logger.info("Created new Google user account")
-        return _finalize_login(
-            response,
-            _user_response(created, is_new=True),
-            req.keep_logged_in,
-        )
     else:
         raise HTTPException(status_code=400, detail="Invalid provider")
 

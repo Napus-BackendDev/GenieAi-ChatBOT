@@ -66,6 +66,19 @@ async def db_get_user_by_tenant(tenant_id: str) -> dict | None:
     return next((user for user in users if user.get("tenant_id") == tenant_id), None)
 
 
+async def db_bump_session_version(tenant_id: str) -> None:
+    """Revoke every session issued so far for this tenant (tokens carry the old session_version)."""
+    db = _mongo_db_or_none()
+    if db is not None:
+        await db.users.update_many({"tenant_id": tenant_id}, {"$inc": {"session_version": 1}})
+        return
+    users = await db_load_users()
+    for user in users:
+        if user.get("tenant_id") == tenant_id:
+            user["session_version"] = int(user.get("session_version") or 0) + 1
+    await db_save_users(users)
+
+
 async def db_set_tenant_status(tenant_id: str, status: str) -> int:
     """Lock tenant sessions before any destructive background work starts."""
     if status not in {"active", "locked", "deleting", "deleted"}:

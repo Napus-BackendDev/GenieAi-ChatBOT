@@ -220,7 +220,9 @@ async def auth_state_guard(request: Request, call_next):
     path = request.url.path
     # Logout must remain callable with an expired/stale cookie so the browser
     # can clear it. Public webhooks use provider signatures instead of admin JWTs.
-    if path not in {"/api/auth/login", "/api/auth/providers", "/api/auth/logout"} and not path.startswith("/api/webhooks/"):
+    # Public auth endpoints must work even with a stale/foreign session cookie (e.g. after JWT_SECRET rotation).
+    public_auth = {"/api/auth/login", "/api/auth/signup", "/api/auth/link-google", "/api/auth/providers", "/api/auth/logout"}
+    if path not in public_auth and not path.startswith("/api/webhooks/"):
         try:
             token = extract_request_token(
                 request.headers.get("Authorization"),
