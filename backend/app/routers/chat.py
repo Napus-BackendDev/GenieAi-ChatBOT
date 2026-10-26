@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import asyncio
 from datetime import datetime
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Depends
@@ -181,11 +182,16 @@ async def get_line_user_profile(user_id: str, tenant_id: str) -> dict:
         except Exception as e:
             logger.error(f"Error fetching LINE profile for {user_id}: {e}")
             
-    # Fallback default
-    return {
+    # Fallback default, cached briefly so the inbox poll does not call LINE again for the same unknown id
+    fallback = {
         "displayName": f"LINE User ({user_id[:8]})",
         "pictureUrl": f"https://api.dicebear.com/7.x/bottts/svg?seed={user_id}"
     }
+    try:
+        await redis_client.setex(cache_key, 120, json.dumps(fallback))
+    except Exception:
+        pass
+    return fallback
 
 @router.get("/sessions")
 async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
@@ -199,14 +205,13 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
         # Durable source of truth for the inbox — survives the 2h Redis TTL.
         conversations = await db_list_conversations(tenant_id)
 
-        real_chats = []
-        for conv in conversations:
+        async def build_row(conv):
             s_id = conv.get("session_id")
             if not s_id or "sandbox" in s_id:
-                continue
+                return None
             history = conv.get("messages", [])
             if not history:
-                continue
+                return None
             # Resolve real profile name and avatar from LINE API
             profile = await get_line_user_profile(s_id, tenant_id)
             display_name = profile.get("displayName") or f"LINE User ({s_id[:8]})"
@@ -222,7 +227,7 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
                 unread_val = unread_val.decode("utf-8")
             unread_count = int(unread_val) if unread_val else 0
 
-            real_chats.append({
+            return {
                 "id": s_id,
                 "name": display_name,
                 "avatar": profile.get("pictureUrl") or f"https://api.dicebear.com/7.x/bottts/svg?seed={s_id}",
@@ -231,8 +236,10 @@ async def get_chat_sessions(tenant_id: str = Depends(get_current_tenant)):
                 "unread": unread_count,
                 "history": history,
                 "requires_human": bool(requires_human)
-            })
-        return real_chats
+            }
+
+        rows = await asyncio.gather(*[build_row(conv) for conv in conversations])
+        return [row for row in rows if row]
     except Exception as e:
         logger.error(f"Error listing chat sessions: {e}")
         return []
