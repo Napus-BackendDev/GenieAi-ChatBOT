@@ -72,8 +72,10 @@ const PALETTE = ['#2B6CB0', '#A2D9E8', '#1A365D', '#38A169', '#D97706', '#7C3AED
 // ---------- helpers ----------
 const parsePrice = (p) => {
   if (typeof p === 'number') return p;
-  const n = parseInt(String(p || '').replace(/[^\d]/g, ''), 10);
-  return isNaN(n) ? 0 : n;
+  // "5,000 - 7,000" is a range: use its midpoint instead of gluing the digits together
+  const nums = (String(p || '').match(/\d[\d,]*/g) || []).map((x) => parseInt(x.replace(/,/g, ''), 10));
+  if (!nums.length) return 0;
+  return nums.length > 1 ? Math.round((nums[0] + nums[1]) / 2) : nums[0];
 };
 
 const startOfDay = (d) => {
@@ -171,31 +173,6 @@ const HBar = ({ label, value, display, max, color, suffix }) => (
   </div>
 );
 
-// ---------- demo generator ----------
-const genDemoBookings = (serviceNames, staffNames) => {
-  const out = [];
-  const now = Date.now();
-  const svc = serviceNames.length ? serviceNames : ['ตรวจปรึกษา', 'ทำหัตถการ', 'ฟอกสีฟัน', 'ขูดหินปูน', 'จัดฟัน'];
-  const stf = staffNames.length ? staffNames : ['ทีมงาน A', 'ทีมงาน B', 'ทีมงาน C'];
-  const count = 48;
-  for (let i = 0; i < count; i++) {
-    const daysAgo = Math.floor(Math.pow(Math.random(), 1.4) * 60); // recency-biased
-    const apptDate = new Date(now - daysAgo * 86400000);
-    apptDate.setHours(9 + Math.floor(Math.random() * 10), Math.random() > 0.5 ? 30 : 0, 0, 0);
-    const created = new Date(apptDate.getTime() - Math.floor(Math.random() * 3) * 86400000);
-    out.push({
-      booking_id: `demo-${i}`,
-      customer_name: `ลูกค้า ${i + 1}`,
-      phone_number: `08${(10000000 + Math.floor(Math.random() * 89999999))}`,
-      service_topic: svc[Math.floor(Math.random() * svc.length)],
-      staff_name: stf[Math.floor(Math.random() * stf.length)],
-      booking_datetime: apptDate.toISOString(),
-      created_at: created.toISOString()
-    });
-  }
-  return out;
-};
-
 const AnalyticsPage = ({ tenantId, lang }) => {
   const t = translations[lang || 'th'];
   const [timeframe, setTimeframe] = useState('30d');
@@ -219,8 +196,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
         const realBookings = bkRes && bkRes.ok ? await bkRes.json() : [];
         const profile = profRes && profRes.ok ? await profRes.json() : {};
         const svcList = (profile && profile.services) || [];
-        const staffList = ((profile && profile.staff) || []).map((s) => s.name).filter(Boolean);
-
+        
         let sessions = [];
         if (sessRes && sessRes.ok) {
           try { sessions = await sessRes.json(); } catch { sessions = []; }
@@ -230,22 +206,11 @@ const AnalyticsPage = ({ tenantId, lang }) => {
 
         setServices(svcList);
 
-        // Use real bookings when we have a meaningful amount, otherwise fall back to demo
-        if (realBookings.length >= 4) {
-          setBookings(realBookings);
-          setIsDemo(false);
-        } else {
-          setBookings(genDemoBookings(svcList.map((s) => s.name).filter(Boolean), staffList));
-          setIsDemo(true);
-        }
+        setBookings(Array.isArray(realBookings) ? realBookings : []);
+        setIsDemo(false);
 
-        if (Array.isArray(sessions) && sessions.length > 0) {
-          const escalated = sessions.filter((s) => s.requires_human).length;
-          const active = sessions.filter((s) => s.time === 'Active now').length;
-          setChat({ total: sessions.length, active, escalated, demo: false });
-        } else {
-          setChat({ total: 128, active: 3, escalated: 9, demo: true });
-        }
+        const list = Array.isArray(sessions) ? sessions : [];
+        setChat({ total: list.length, active: list.filter((x) => x.time === 'Active now').length, escalated: list.filter((x) => x.requires_human).length, demo: false });
       } catch (e) {
         console.error('Failed to load analytics:', e);
       } finally {
