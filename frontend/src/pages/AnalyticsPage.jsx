@@ -8,8 +8,6 @@ const translations = {
   th: {
     title: 'วิเคราะห์ข้อมูล',
     subtitle: 'ภาพรวมประสิทธิภาพธุรกิจและผู้ช่วย AI ของร้านคุณ',
-    demoBadge: 'ข้อมูลสาธิต',
-    demoTip: 'ยังมีข้อมูลการจองจริงไม่พอ ระบบจึงแสดงตัวอย่างเพื่อให้เห็นหน้าตากราฟ',
     tf7: '7 วัน', tf30: '30 วัน', tf12m: '12 เดือน',
     kpiBookings: 'ยอดจองในช่วงนี้',
     kpiRevenue: 'รายได้ประมาณ',
@@ -30,6 +28,8 @@ const translations = {
     activeSessions: 'กำลังสนทนา',
     revenueByService: 'รายได้ตามบริการ',
     noData: 'ยังไม่มีข้อมูล',
+    updated: 'อัปเดต',
+    emptyAll: 'ยังไม่มีการจอง ตัวเลขจะแสดงที่นี่อัตโนมัติเมื่อลูกค้าจองผ่าน LINE, Facebook หรือแชทบนเว็บ',
     bookings: 'การจอง',
     baht: 'บาท',
     days: ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'],
@@ -38,8 +38,6 @@ const translations = {
   en: {
     title: 'Analytics',
     subtitle: 'Business performance and AI assistant overview for your shop',
-    demoBadge: 'Demo data',
-    demoTip: 'Not enough real bookings yet, so sample data is shown to preview the charts.',
     tf7: '7 days', tf30: '30 days', tf12m: '12 months',
     kpiBookings: 'Bookings this period',
     kpiRevenue: 'Est. Revenue',
@@ -60,6 +58,8 @@ const translations = {
     activeSessions: 'Active now',
     revenueByService: 'Revenue by Service',
     noData: 'No data yet',
+    updated: 'Updated',
+    emptyAll: 'No bookings yet. Numbers appear here automatically once customers book through LINE, Facebook or web chat.',
     bookings: 'bookings',
     baht: 'THB',
     days: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
@@ -179,46 +179,40 @@ const AnalyticsPage = ({ tenantId, lang }) => {
   const [loading, setLoading] = useState(true);
   const [bookings, setBookings] = useState([]);
   const [services, setServices] = useState([]);
-  const [isDemo, setIsDemo] = useState(false);
-  const [chat, setChat] = useState({ total: 0, active: 0, escalated: 0, demo: false });
+  const [sessions, setSessions] = useState([]);
+  const [updatedAt, setUpdatedAt] = useState(null);
 
+  // Live data: loads on mount, then silently refreshes every minute and when the tab regains focus
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      setLoading(true);
+    const load = async (first) => {
+      if (first) setLoading(true);
       try {
         const [bkRes, profRes, sessRes] = await Promise.all([
-          fetch(`/api/bookings?tenant_id=${tenantId}`).catch(() => null),
+          fetch('/api/bookings').catch(() => null),
           fetch(`/api/tenant/profile/${tenantId}`).catch(() => null),
-          fetch(`/api/chat/sessions?tenant_id=${tenantId}`).catch(() => null)
+          fetch('/api/chat/sessions').catch(() => null)
         ]);
-
-        const realBookings = bkRes && bkRes.ok ? await bkRes.json() : [];
-        const profile = profRes && profRes.ok ? await profRes.json() : {};
-        const svcList = (profile && profile.services) || [];
-        
-        let sessions = [];
-        if (sessRes && sessRes.ok) {
-          try { sessions = await sessRes.json(); } catch { sessions = []; }
-        }
-
+        const json = async (r, fallback) => {
+          try { return r && r.ok ? await r.json() : fallback; } catch { return fallback; }
+        };
+        const [bk, profile, sess] = await Promise.all([json(bkRes, []), json(profRes, {}), json(sessRes, [])]);
         if (cancelled) return;
-
-        setServices(svcList);
-
-        setBookings(Array.isArray(realBookings) ? realBookings : []);
-        setIsDemo(false);
-
-        const list = Array.isArray(sessions) ? sessions : [];
-        setChat({ total: list.length, active: list.filter((x) => x.time === 'Active now').length, escalated: list.filter((x) => x.requires_human).length, demo: false });
+        setBookings(Array.isArray(bk) ? bk : []);
+        setServices((profile && profile.services) || []);
+        setSessions(Array.isArray(sess) ? sess : (sess && sess.sessions) || []);
+        setUpdatedAt(new Date());
       } catch (e) {
         console.error('Failed to load analytics:', e);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && first) setLoading(false);
       }
     };
-    load();
-    return () => { cancelled = true; };
+    load(true);
+    const timer = setInterval(() => load(false), 60000);
+    const onVisible = () => { if (document.visibilityState === 'visible') load(false); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, [tenantId]);
 
   const priceMap = useMemo(() => {
@@ -332,7 +326,19 @@ const AnalyticsPage = ({ tenantId, lang }) => {
     return counts.map((count, i) => ({ label: t.days[i], count }));
   }, [curBookings, t.days]);
 
-  const resolutionRate = chat.total > 0 ? Math.round(((chat.total - chat.escalated) / chat.total) * 100) : 0;
+  // Chat stats follow the selected period (a session counts when its last message falls inside it)
+  const chat = useMemo(() => {
+    const since = Date.now() - periodDays * 86400000;
+    const inPeriod = sessions.filter((x) => {
+      const ms = new Date(x.time).getTime();
+      return isNaN(ms) || x.time === 'Active now' || ms >= since;
+    });
+    return {
+      total: inPeriod.length,
+      escalated: inPeriod.filter((x) => x.requires_human).length
+    };
+  }, [sessions, periodDays]);
+  const resolutionRate = chat.total > 0 ? Math.round(((chat.total - chat.escalated) / chat.total) * 100) : null;
 
   const revenueByService = useMemo(() => {
     const rev = {};
@@ -396,13 +402,8 @@ const AnalyticsPage = ({ tenantId, lang }) => {
           <h2 className="text-2xl font-extrabold text-[#1A365D] dark:text-white flex items-center gap-2">
             <Sparkles size={22} className="text-[#2B6CB0] dark:text-cyan-400" />
             {t.title}
-            {isDemo && (
-              <span className="text-[10px] font-bold text-amber-600 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full" title={t.demoTip}>
-                {t.demoBadge}
-              </span>
-            )}
           </h2>
-          <p className="text-xs text-[#2B6CB0] font-semibold mt-1">{t.subtitle}</p>
+          <p className="text-xs text-[#2B6CB0] font-semibold mt-1">{t.subtitle}{updatedAt && ` · ${t.updated} ${updatedAt.toLocaleTimeString(lang === 'th' ? 'th-TH' : 'en-US', { hour: '2-digit', minute: '2-digit' })}`}</p>
         </div>
 
         {/* Timeframe selector */}
@@ -420,12 +421,18 @@ const AnalyticsPage = ({ tenantId, lang }) => {
         </div>
       </div>
 
+      {bookings.length === 0 && (
+        <div className="rounded-2xl border border-dashed border-[#A2D9E8] bg-[#E6F4F8]/30 dark:bg-slate-900 dark:border-white/10 px-5 py-4 text-xs font-semibold text-slate-500 dark:text-slate-300">
+          {t.emptyAll}
+        </div>
+      )}
+
       {/* KPI row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <KpiCard icon={CalendarCheck} label={t.kpiBookings} value={curBookings.length} change={bookingChange} accent="#2B6CB0" />
         <KpiCard icon={DollarSign} label={t.kpiRevenue} value={`${revenueIsEstimate ? '~' : ''}฿${revenue.toLocaleString('th-TH')}`} change={revenueChange} accent="#38A169" />
         <KpiCard icon={Users} label={t.kpiCustomers} value={uniqueCustomers} accent="#7C3AED" />
-        <KpiCard icon={Bot} label={t.kpiResolution} value={chat.demo ? '—' : `${resolutionRate}%`} accent="#0891B2" />
+        <KpiCard icon={Bot} label={t.kpiResolution} value={resolutionRate === null ? '—' : `${resolutionRate}%`} accent="#0891B2" />
       </div>
 
       {/* Row 2: Trend + Top services */}
@@ -464,7 +471,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
                       <span className="truncate">{s.name}</span>
                     </span>
                     <span className="font-extrabold text-[#1A365D] dark:text-white shrink-0">
-                      {Math.round((s.count / curBookings.length) * 100)}%
+                      {Math.round((s.count / Math.max(1, curBookings.length)) * 100)}%
                     </span>
                   </div>
                 ))}
@@ -519,11 +526,6 @@ const AnalyticsPage = ({ tenantId, lang }) => {
         <div className="bg-white dark:bg-slate-900 border border-[#A2D9E8]/20 dark:border-white/5 p-6 rounded-3xl shadow-[0_4px_20px_rgba(26,54,93,0.02)] flex flex-col md:col-span-2 xl:col-span-1">
           <h3 className="text-sm font-extrabold text-[#1A365D] dark:text-white flex items-center gap-2 mb-4">
             <Bot size={16} className="text-[#2B6CB0] dark:text-cyan-400" />{t.aiPerf}
-            {chat.demo && (
-              <span className="text-[9px] font-bold text-amber-600 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-full">
-                {t.demoBadge}
-              </span>
-            )}
           </h3>
           <div className="flex items-center gap-5">
             <DonutChart
@@ -531,7 +533,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
                 { value: chat.total - chat.escalated, color: '#38A169' },
                 { value: chat.escalated, color: '#D97706' }
               ]}
-              centerLabel={`${resolutionRate}%`}
+              centerLabel={resolutionRate === null ? '—' : `${resolutionRate}%`}
             />
             <div className="flex flex-col gap-3 flex-1 min-w-0">
               <div className="flex justify-between items-center text-xs">
