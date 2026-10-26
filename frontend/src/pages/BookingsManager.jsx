@@ -344,10 +344,10 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
           isSelected
             ? 'bg-gradient-to-br from-cyan-500 to-indigo-500 text-white shadow-lg shadow-cyan-500/30 font-bold'
             : isToday
-            ? 'bg-cyan-500/10 ring-2 ring-cyan-500/40 text-cyan-500 dark:text-cyan-300 font-bold'
+            ? 'bg-cyan-500/10 ring-2 ring-cyan-500/40 text-cyan-700 dark:text-cyan-300 font-bold'
             : count > 0
-            ? 'text-foreground bg-white/[0.03] hover:bg-white/10 font-semibold'
-            : 'text-default-400 hover:bg-white/5'
+            ? 'text-foreground bg-slate-50 dark:bg-white/[0.03] hover:bg-slate-100 dark:hover:bg-white/10 font-semibold'
+            : 'text-default-400 hover:bg-slate-100 dark:hover:bg-white/5'
         }`}
       >
         <span className="text-sm leading-none">{d}</span>
@@ -409,7 +409,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
             <div className="flex justify-between items-center pb-3 border-b border-white/5">
               <div className="flex flex-col">
                 <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
-                  <CalendarIcon size={18} className="text-cyan-400" />
+                  <CalendarIcon size={18} className="text-cyan-600 dark:text-cyan-400" />
                   <span>{thaiMonths[month]} {lang === 'th' ? year + 543 : year}</span>
                 </h2>
                 <span className="text-[11px] text-default-400 font-semibold mt-0.5 ml-6">
@@ -451,7 +451,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
             {/* Weekdays Labels */}
             <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-wider mb-2">
               {weekdays.map((day, idx) => (
-                <div key={idx} className={idx === 0 ? 'text-rose-400' : idx === 6 ? 'text-cyan-400' : 'text-default-400'}>
+                <div key={idx} className={idx === 0 ? 'text-rose-500' : idx === 6 ? 'text-cyan-600 dark:text-cyan-400' : 'text-default-400'}>
                   {day}
                 </div>
               ))}
@@ -489,11 +489,11 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
                 <h3 className="font-bold text-foreground text-lg">
                   {t.dailyQueue}
                 </h3>
-                <p className="text-xs text-cyan-400 font-semibold mt-0.5">
+                <p className="text-xs text-cyan-600 dark:text-cyan-400 font-semibold mt-0.5">
                   {formatDateLabel(selectedDate)}
                 </p>
               </div>
-              <div className="flex bg-slate-900/60 dark:bg-black/40 border border-white/5 p-1 rounded-xl">
+              <div className="flex bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/5 p-1 rounded-xl">
                 <button
                   onClick={() => setStatusFilter('upcoming')}
                   className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all duration-300 cursor-pointer ${
@@ -541,7 +541,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
 
             {/* Bookings List — flat, time-sorted; the doctor is just an optional tag */}
             {filteredBookings.length === 0 ? (
-              <div className="py-16 text-center text-default-400 text-sm flex-1 flex flex-col items-center justify-center border border-dashed border-white/5 rounded-2xl bg-slate-900/10">
+              <div className="py-16 text-center text-default-400 text-sm flex-1 flex flex-col items-center justify-center border border-dashed border-slate-300 dark:border-white/5 rounded-2xl bg-slate-50 dark:bg-slate-900/10">
                 <CalendarIcon size={32} className="text-default-400 opacity-60 mb-2" />
                 <span>{t.noBookings}</span>
               </div>
@@ -567,7 +567,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
                       >
                         {/* Time chip */}
                         <div className="flex flex-col items-center justify-center px-2.5 rounded-xl bg-gradient-to-br from-cyan-500/10 to-indigo-500/10 border border-cyan-500/15 shrink-0 min-w-[62px]">
-                          <Clock size={12} className="text-cyan-400 mb-0.5" />
+                          <Clock size={12} className="text-cyan-600 dark:text-cyan-400 mb-0.5" />
                           <span className="text-[11px] font-extrabold text-cyan-500 dark:text-cyan-300 leading-tight text-center">
                             {formatTime(booking.booking_datetime)}
                           </span>
@@ -582,7 +582,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
                                 {booking.customer_name || '—'}
                               </span>
                               {!isFuture && (
-                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/15 text-slate-400 font-bold shrink-0">
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-500/15 text-slate-500 dark:text-slate-400 font-bold shrink-0">
                                   {lang === 'th' ? 'ผ่านแล้ว' : 'past'}
                                 </span>
                               )}

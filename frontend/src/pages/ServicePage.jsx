@@ -206,7 +206,7 @@ const CustomSelect = ({ value, onChange, options, placeholder, icon: Icon }) => 
         </div>
         <ChevronDown 
           size={14} 
-          className={`text-slate-400 transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180' : ''}`} 
+          className={`text-slate-500 dark:text-slate-400 transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180' : ''}`} 
         />
       </button>
 
@@ -745,7 +745,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
               <form onSubmit={handleServicesSave} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-3 max-h-[50vh] overflow-y-auto pr-1">
                   {(!profile.services || profile.services.length === 0) ? (
-                    <div className="py-12 text-center text-slate-400 text-xs">
+                    <div className="py-12 text-center text-slate-500 dark:text-slate-400 text-xs">
                       {t.noServices}
                     </div>
                   ) : (
@@ -856,7 +856,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                     <div className="flex justify-between items-center">
                       <div>
                         <h4 className="text-sm font-bold text-[#1A365D] dark:text-white">{t.customRulesTitle}</h4>
-                        <p className="text-[10px] text-slate-400 mt-0.5">{t.customRulesSub}</p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{t.customRulesSub}</p>
                       </div>
                       <Button 
                         type="button"
@@ -871,7 +871,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
 
                     <div className="flex flex-col gap-3 max-h-[300px] overflow-y-auto pr-1">
                       {(!profile.custom_rules || profile.custom_rules.length === 0) ? (
-                        <div className="py-6 text-center text-slate-400 text-xs">
+                        <div className="py-6 text-center text-slate-500 dark:text-slate-400 text-xs">
                           {t.noCustomRules}
                         </div>
                       ) : (
@@ -938,7 +938,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                 </div>
 
                 {documents.length === 0 ? (
-                  <div className="py-6 text-center text-slate-400 text-xs">
+                  <div className="py-6 text-center text-slate-500 dark:text-slate-400 text-xs">
                     {t.noDocs}
                   </div>
                 ) : (
@@ -951,7 +951,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                           </div>
                           <div>
                             <h4 className="text-xs font-bold text-[#1A365D] dark:text-white">{doc.document_name}</h4>
-                            <p className="text-[10px] text-slate-400 mt-0.5">
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                               {doc.page_count} {lang === 'th' ? 'หน้า • อัปโหลดเมื่อ' : 'pages • Uploaded at'} {formatDate(doc.uploaded_at)}
                             </p>
                           </div>
@@ -1003,7 +1003,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
             <div className="flex flex-wrap gap-4 w-full items-center">
               {/* Search Bar */}
               <div className="flex bg-[#FFFFFF] dark:bg-slate-900 border border-[#A2D9E8]/20 dark:border-white/5 p-3 px-4 rounded-2xl shadow-sm items-center flex-1 min-w-[200px] max-w-xs gap-3 h-11">
-                <Search size={16} className="text-slate-400 shrink-0" />
+                <Search size={16} className="text-slate-500 dark:text-slate-400 shrink-0" />
                 <input
                   type="text"
                   placeholder={t.searchPromosPlaceholder}
@@ -1015,7 +1015,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
 
               {/* Campaign Select Filter */}
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">{t.filterCampaignLabel}</span>
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">{t.filterCampaignLabel}</span>
                 <CustomSelect
                   value={selectedCampaignFilter}
                   onChange={setSelectedCampaignFilter}
@@ -1034,7 +1034,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                 const groupedCampaigns = getFilteredAndGroupedPromotions();
                 if (groupedCampaigns.length === 0) {
                   return (
-                    <div className="py-12 text-center text-slate-400 text-sm">
+                    <div className="py-12 text-center text-slate-500 dark:text-slate-400 text-sm">
                       {t.noPromos}
                     </div>
                   );
@@ -1059,7 +1059,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                             </div>
                             
                             {/* Campaign settings summary */}
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-[10px] text-slate-400 font-bold">
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-[10px] text-slate-500 dark:text-slate-400 font-bold">
                               {campaign.valid_until && (
                                 <div className="flex items-center gap-1">
                                   <Calendar size={11} className="shrink-0" />
@@ -1168,7 +1168,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                                     {promo.description}
                                   </p>
                                   
-                                  <div className="border-t border-slate-200/40 dark:border-white/5 pt-2 flex flex-col gap-0.5 text-[9px] text-slate-400 font-bold">
+                                  <div className="border-t border-slate-200/40 dark:border-white/5 pt-2 flex flex-col gap-0.5 text-[9px] text-slate-500 dark:text-slate-400 font-bold">
                                     <div>{t.expiryLabel} <span className="text-[#1A365D] dark:text-slate-300">{promo.valid_until || (lang === 'th' ? 'ไม่มีกำหนด' : 'No Expiry')}</span></div>
                                     {promo.conditions && <div>{t.conditionsLabel} <span className="text-slate-500 font-medium truncate block" title={promo.conditions}>{promo.conditions}</span></div>}
                                   </div>
@@ -1228,7 +1228,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
               <CardContent className="p-0 flex flex-col gap-6">
 
               {(!profile.faq || profile.faq.length === 0) ? (
-                <div className="py-12 text-center text-slate-400 text-sm">
+                <div className="py-12 text-center text-slate-500 dark:text-slate-400 text-sm">
                   {t.noFaqs}
                 </div>
               ) : (
@@ -1246,7 +1246,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
                         </div>
                       </div>
                       <div className="text-xs text-slate-500 font-medium flex items-start gap-2 pl-6">
-                        <span className="bg-emerald-500/10 text-emerald-500 px-1 rounded text-[10px] shrink-0 font-bold">A</span>
+                        <span className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-1 rounded text-[10px] shrink-0 font-bold">A</span>
                         <p className="leading-relaxed">{faq.answer}</p>
                       </div>
                     </div>
@@ -1426,7 +1426,7 @@ const ServicePage = ({ activeTab, tenantId, triggerReupload, lang, onProfileUpda
             
             <form onSubmit={submitCampaignForm} className="flex flex-col gap-4">
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-400">{t.campaignNameLabel}</label>
+                <label className="text-xs font-bold text-slate-500 dark:text-slate-400">{t.campaignNameLabel}</label>
                 <div className="text-sm font-bold text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-950 px-3 py-2 border border-slate-200 dark:border-white/10 rounded-xl">
                   {editingCampaignName}
                 </div>

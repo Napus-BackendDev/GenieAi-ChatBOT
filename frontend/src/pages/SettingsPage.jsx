@@ -60,7 +60,13 @@ const translations = {
     copyBtn: "คัดลอก",
     copied: "คัดลอกแล้ว!",
     webhookUrlLabel: "Webhook URL สำหรับไปวาง:",
-    modelHelp: "รุ่นสมองหลักที่ใช้ในการสืบค้นข้อมูลและดำเนินการนัดหมายอัตโนมัติ"
+    modelHelp: "รุ่นสมองหลักที่ใช้ในการสืบค้นข้อมูลและดำเนินการนัดหมายอัตโนมัติ",
+    deleteTab: "ลบบัญชี",
+    deleteWarningTitle: "ลบบัญชีและข้อมูลทั้งหมด",
+    deleteWarningDesc: "บัญชีจะถูกล็อกทันที และข้อมูลทั้งหมดของร้าน (เอกสาร บริการ การจอง แชท) จะถูกลบถาวรและกู้คืนไม่ได้",
+    deleteConfirmPrompt: "พิมพ์ชื่อร้านให้ตรงเพื่อยืนยัน:",
+    deleteButton: "ลบบัญชีถาวร",
+    deletingText: "กำลังลบ..."
   },
   en: {
     title: "System Settings",
@@ -119,7 +125,13 @@ const translations = {
     copyBtn: "Copy",
     copied: "Copied!",
     webhookUrlLabel: "Your Webhook URL to copy:",
-    modelHelp: "Primary brain model used for document lookups and automated booking flows."
+    modelHelp: "Primary brain model used for document lookups and automated booking flows.",
+    deleteTab: "Delete Account",
+    deleteWarningTitle: "Delete account and all data",
+    deleteWarningDesc: "Your account is locked immediately and all shop data (documents, services, bookings, chats) is permanently deleted and cannot be recovered.",
+    deleteConfirmPrompt: "Type the shop name exactly to confirm:",
+    deleteButton: "Delete permanently",
+    deletingText: "Deleting..."
   }
 };
 
@@ -394,7 +406,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
 
   if (loading) {
     return (
-      <div className="py-12 text-center text-slate-400 text-sm animate-pulse">
+      <div className="py-12 text-center text-slate-500 dark:text-slate-400 text-sm animate-pulse">
         {lang === 'th' ? 'กำลังโหลดการตั้งค่า...' : 'Loading settings...'}
       </div>
     );
@@ -458,11 +470,11 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h3 className="text-base font-bold text-[#1A365D] dark:text-white mb-1">{t.lineTab} Integration</h3>
-                        <p className="text-xs text-slate-400">{lang === 'th' ? 'เชื่อมโยงปัญญาประดิษฐ์เข้ากับ LINE Official Account (LINE OA) ของท่าน' : 'Link AI helper to your LINE OA channel.'}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{lang === 'th' ? 'เชื่อมโยงปัญญาประดิษฐ์เข้ากับ LINE Official Account (LINE OA) ของท่าน' : 'Link AI helper to your LINE OA channel.'}</p>
                       </div>
                       {/* Connection status badge (from *_configured, not from any token) */}
                       {lineConfigured ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold bg-[#38A169]/10 text-[#38A169] border border-[#38A169]/25">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold bg-[#38A169]/10 text-[#276749] dark:text-[#38A169] border border-[#38A169]/25">
                           <CheckCircle2 size={13} /> {t.lineStatusConnected}
                         </span>
                       ) : (
@@ -497,7 +509,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
 
                       {/* Webhook URL row + localhost guard */}
                       <div className="flex flex-col gap-1.5 mt-1 bg-white dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200/50 dark:border-white/5">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.webhookUrlLabel}</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">{t.webhookUrlLabel}</span>
                         <div className="flex items-center gap-2">
                           <code className="text-xs text-[#2B6CB0] dark:text-cyan-400 font-mono break-all flex-1">{webhookUrls.line}</code>
                           <button
@@ -602,7 +614,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                   <div className="flex flex-col gap-5">
                     <div>
                       <h3 className="text-base font-bold text-[#1A365D] dark:text-white mb-1">{t.fbTab} Integration</h3>
-                      <p className="text-xs text-slate-400">{lang === 'th' ? 'เชื่อมโยง AI เข้ากับหน้าเพจ Facebook Messenger เพื่อตอบลูกค้า' : 'Connect AI to your Facebook Page Messenger.'}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{lang === 'th' ? 'เชื่อมโยง AI เข้ากับหน้าเพจ Facebook Messenger เพื่อตอบลูกค้า' : 'Connect AI to your Facebook Page Messenger.'}</p>
                     </div>
 
                     <div className="p-4 bg-slate-50/50 dark:bg-slate-950/40 border border-slate-100 dark:border-white/5 rounded-2xl flex flex-col gap-3">
@@ -611,7 +623,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                       <p className="text-[11px] text-slate-500 leading-relaxed font-medium">{t.fbStep2}</p>
                       
                       <div className="flex flex-col gap-1.5 mt-1 bg-white dark:bg-slate-900/60 p-3 rounded-xl border border-slate-200/50 dark:border-white/5">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.webhookUrlLabel}</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">{t.webhookUrlLabel}</span>
                         <div className="flex items-center gap-2">
                           <code className="text-xs text-[#2B6CB0] dark:text-cyan-400 font-mono break-all flex-1">{webhookUrls.facebook}</code>
                           <button
@@ -680,7 +692,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                   <div className="flex flex-col gap-5">
                     <div>
                       <h3 className="text-base font-bold text-[#1A365D] dark:text-white mb-1">Web Chat Widget</h3>
-                      <p className="text-xs text-slate-400">{lang === 'th' ? 'ฝังกล่องแชตลงบนเว็บไซต์หลักของร้านเพื่อตอบคำถามลูกค้า' : 'Embed chatbot onto your primary website.'}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{lang === 'th' ? 'ฝังกล่องแชตลงบนเว็บไซต์หลักของร้านเพื่อตอบคำถามลูกค้า' : 'Embed chatbot onto your primary website.'}</p>
                     </div>
 
                     <div className="flex items-center gap-3 bg-slate-50/50 dark:bg-slate-950/40 p-4 rounded-xl border border-slate-200/50 dark:border-white/5">
@@ -766,7 +778,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                   <div className="flex flex-col gap-5">
                     <div>
                       <h3 className="text-base font-bold text-[#1A365D] dark:text-white mb-1">{t.aiTab}</h3>
-                      <p className="text-xs text-slate-400">{lang === 'th' ? 'ปรับแต่งโมเดลประมวลผลคำตอบและขอบเขตเงื่อนไขจองคิวการนัดหมาย' : 'Tune AI parameters and booking constraint logic.'}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{lang === 'th' ? 'ปรับแต่งโมเดลประมวลผลคำตอบและขอบเขตเงื่อนไขจองคิวการนัดหมาย' : 'Tune AI parameters and booking constraint logic.'}</p>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -783,7 +795,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                           <option value="gpt-4o-mini">gpt-4o-mini (เสถียร & รวดเร็ว)</option>
                           <option value="gpt-4o">gpt-4o (วิเคราะห์ซับซ้อนแม่นยำสูง)</option>
                         </select>
-                        <span className="text-[10px] text-slate-400 leading-tight mt-0.5">{t.modelHelp}</span>
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight mt-0.5">{t.modelHelp}</span>
                       </div>
 
                       <div className="flex flex-col gap-1 text-left">
@@ -819,7 +831,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                         })}
                         className="w-full text-foreground bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-xl h-11"
                       />
-                      <span className="text-[10px] text-slate-400 leading-normal mt-1">{t.aiThresholdHelper}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal mt-1">{t.aiThresholdHelper}</span>
                     </div>
 
                     {/* LINE reply pacing (human-like typing) */}
@@ -851,7 +863,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                           );
                         })}
                       </div>
-                      <span className="text-[10px] text-slate-400 leading-normal mt-1">{t.paceHelper}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal mt-1">{t.paceHelper}</span>
                     </div>
 
                     <div className="flex flex-col gap-1 text-left border-t border-slate-100 dark:border-white/5 pt-4">
@@ -865,7 +877,7 @@ const SettingsPage = ({ tenantId, lang, onLogout }) => {
                         })}
                         className="w-full text-foreground bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-white/10 rounded-xl h-11"
                       />
-                      <span className="text-[10px] text-slate-400 leading-normal mt-1">{t.bookingBufferHelper}</span>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal mt-1">{t.bookingBufferHelper}</span>
                     </div>
                   </div>
                 )}

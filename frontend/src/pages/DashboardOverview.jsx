@@ -276,7 +276,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] font-bold">
-            <span className="text-slate-400 font-medium">{t.allTime}</span>
+            <span className="text-slate-500 dark:text-slate-400 font-medium">{t.allTime}</span>
           </div>
         </div>
 
@@ -296,7 +296,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] font-bold">
-            <span className="text-slate-400 font-medium">{t.ragActive}</span>
+            <span className="text-slate-500 dark:text-slate-400 font-medium">{t.ragActive}</span>
           </div>
         </div>
 
@@ -316,7 +316,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
             </div>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] font-bold">
-            <span className="text-slate-400 font-medium">{t.waitingService}</span>
+            <span className="text-slate-500 dark:text-slate-400 font-medium">{t.waitingService}</span>
           </div>
         </div>
 
@@ -370,7 +370,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
                 {t.appointments}
               </h3>
               <div className="flex gap-4 mt-2">
-                <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5">
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                   <span className="chart-legend-dot bg-[#2B6CB0]"></span>
                   {t.bookings}
                 </span>
@@ -390,12 +390,12 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
                       title={`${d.count}`}
                     ></div>
                   </div>
-                  <span className="text-[10px] text-slate-400 font-bold mt-2">{d.label}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold mt-2">{d.label}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="min-h-[180px] flex flex-col items-center justify-center text-center text-slate-400 text-xs">
+            <div className="min-h-[180px] flex flex-col items-center justify-center text-center text-slate-500 dark:text-slate-400 text-xs">
               <Calendar size={36} className="opacity-30 mb-2" />
               <span>{t.noAppointmentData}</span>
             </div>
@@ -411,7 +411,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
           </div>
 
           {topServices.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 text-xs py-6">
+            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-500 dark:text-slate-400 text-xs py-6">
               <span>{t.noServiceData}</span>
             </div>
           ) : (
@@ -443,7 +443,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                   <span className="text-base font-extrabold text-[#1A365D] dark:text-white">{bookings.length}</span>
-                  <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">{t.bookings}</span>
+                  <span className="text-[8px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">{t.bookings}</span>
                 </div>
               </div>
 
@@ -492,29 +492,29 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
 
               <div className="grid grid-cols-2 gap-y-3 gap-x-2 my-2 py-2 border-t border-b border-slate-50 dark:border-white/5 text-xs text-slate-500 font-medium">
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">{t.bookingId}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-bold uppercase">{t.bookingId}</span>
                   <span className="text-[#1A365D] dark:text-white truncate block max-w-[100px] font-bold">{(nextBooking.booking_id || '').substring(0, 8) || '-'}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">{t.mobilePhone}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-bold uppercase">{t.mobilePhone}</span>
                   <span className="text-[#1A365D] dark:text-white block font-bold">{nextBooking.phone_number || '-'}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">{t.date}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-bold uppercase">{t.date}</span>
                   <span className="text-[#1A365D] dark:text-white block font-bold">{formatDate(nextBooking.booking_datetime)}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400 block font-bold uppercase">{t.time}</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-bold uppercase">{t.time}</span>
                   <span className="text-[#2B6CB0] dark:text-cyan-400 block font-extrabold">{formatTime(nextBooking.booking_datetime)}</span>
                 </div>
               </div>
 
-              <div className="text-[10px] text-slate-400 italic">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 italic">
                 {t.lineSentNotice}
               </div>
             </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 text-xs">
+            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-500 dark:text-slate-400 text-xs">
               <User size={36} className="opacity-30 mb-2" />
               <span>{t.noNextBooking}</span>
             </div>
@@ -528,7 +528,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
           </h3>
 
           {profileStaff.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 text-xs px-4">
+            <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-500 dark:text-slate-400 text-xs px-4">
               <Users size={36} className="opacity-30 mb-2" />
               <span>{t.noStaff}</span>
             </div>
@@ -562,7 +562,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
 
           <div className="flex-1 flex flex-col gap-3 overflow-y-auto scrollbar-hidden">
             {recentBookings.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-400 text-xs">
+              <div className="flex-1 flex flex-col items-center justify-center text-center text-slate-500 dark:text-slate-400 text-xs">
                 <Calendar size={36} className="opacity-30 mb-2" />
                 <span>{t.noBookings}</span>
               </div>
@@ -580,7 +580,7 @@ const DashboardOverview = ({ tenantId, user, lang, setActiveTab }) => {
                       {req.service_topic || '-'}
                     </p>
                   </div>
-                  <span className="text-[9px] font-bold text-slate-400 shrink-0 ml-2 text-right">
+                  <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 shrink-0 ml-2 text-right">
                     {formatDate(req.booking_datetime)}
                   </span>
                 </div>

@@ -143,7 +143,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
       </div>
 
       {/* Sub Tabs Toggle */}
-      <div className="mb-6 w-full flex bg-slate-900/60 dark:bg-black/40 border border-white/5 p-1 rounded-xl max-w-md">
+      <div className="mb-6 w-full flex bg-slate-100 dark:bg-black/40 border border-slate-200 dark:border-white/5 p-1 rounded-xl max-w-md">
         <button
           type="button"
           onClick={() => { setActiveSubTab('profile'); setMessage({ type: '', text: '' }); }}
@@ -192,7 +192,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                     value={profile.company_name}
                     onChange={(e) => setProfile({ ...profile, company_name: e.target.value })}
                     required
-                    className="w-full text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                    className="w-full text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5 w-full text-left">
@@ -201,7 +201,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                     type="text"
                     value={profile.contact_number}
                     onChange={(e) => setProfile({ ...profile, contact_number: e.target.value })}
-                    className="w-full text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                    className="w-full text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                   />
                 </div>
               </div>
@@ -214,7 +214,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                     value={profile.business_hours}
                     placeholder="เช่น เปิดทุกวัน 09:00 - 20:00 น."
                     onChange={(e) => setProfile({ ...profile, business_hours: e.target.value })}
-                    className="w-full text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                    className="w-full text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5 w-full text-left">
@@ -224,7 +224,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                     value={profile.webhook_domain || ''}
                     placeholder="เช่น https://your-nginx-domain.com หรือ https://xxx.ngrok-free.app"
                     onChange={(e) => setProfile({ ...profile, webhook_domain: e.target.value })}
-                    className="w-full text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                    className="w-full text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                   />
                 </div>
               </div>
@@ -260,7 +260,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                             value={service.name}
                             onChange={(e) => handleServiceChange(idx, 'name', e.target.value)}
                             required
-                            className="flex-1 text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                            className="flex-1 text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                           />
                           <Input
                             type="number"
@@ -268,7 +268,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                             value={service.price}
                             onChange={(e) => handleServiceChange(idx, 'price', e.target.value)}
                             required
-                            className="w-full md:w-36 text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                            className="w-full md:w-36 text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                           />
                           <Input
                             type="number"
@@ -276,7 +276,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                             value={service.duration}
                             onChange={(e) => handleServiceChange(idx, 'duration', e.target.value)}
                             required
-                            className="w-full md:w-36 text-foreground bg-slate-900/60 dark:bg-black/40 border border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
+                            className="w-full md:w-36 text-foreground bg-white dark:bg-black/40 border border-slate-200 dark:border-white/5 rounded-xl h-11 focus:border-cyan-500/40 transition-colors"
                           />
                           <Button
                             type="button"
@@ -344,7 +344,7 @@ const DocumentManager = ({ tenantId, triggerReupload }) => {
                           {doc.document_name}
                         </h4>
                         <p className="text-xs text-default-400 mt-1">
-                          จำนวน: <span className="text-cyan-400 font-semibold">{doc.page_count}</span> หน้า • อัปโหลดเมื่อ: <span className="opacity-80">{formatDate(doc.uploaded_at)}</span>
+                          จำนวน: <span className="text-cyan-600 dark:text-cyan-400 font-semibold">{doc.page_count}</span> หน้า • อัปโหลดเมื่อ: <span className="opacity-80">{formatDate(doc.uploaded_at)}</span>
                         </p>
                       </div>
                     </div>

@@ -324,12 +324,12 @@ const LineChatManager = ({ tenantId, lang }) => {
         {/* Sessions list */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-white/5">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-2">
+            <div className="flex flex-col items-center justify-center py-20 text-slate-500 dark:text-slate-400 gap-2">
               <div className="animate-spin rounded-full h-6 w-6 border-2 border-t-transparent border-[#2B6CB0]"></div>
               <span className="text-xs font-semibold">Loading chats...</span>
             </div>
           ) : filteredSessions.length === 0 ? (
-            <div className="text-center py-20 text-slate-400 text-xs font-medium">
+            <div className="text-center py-20 text-slate-500 dark:text-slate-400 text-xs font-medium">
               {t.noSessions}
             </div>
           ) : (
@@ -363,7 +363,7 @@ const LineChatManager = ({ tenantId, lang }) => {
                       <h4 className={`text-xs font-bold truncate ${isSelected ? 'text-[#2B6CB0] dark:text-cyan-400' : 'text-[#1A365D] dark:text-white'}`}>
                         {session.name}
                       </h4>
-                      <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap ml-1">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap ml-1">
                         {formatSessionTime(session.time, lang)}
                       </span>
                     </div>
@@ -615,7 +615,7 @@ const LineChatManager = ({ tenantId, lang }) => {
           <h3 className="text-sm font-bold text-[#1A365D]/80 dark:text-white/80 mb-1">
             {t.noChatSelected}
           </h3>
-          <p className="text-xs text-slate-400 text-center max-w-sm">
+          <p className="text-xs text-slate-500 dark:text-slate-400 text-center max-w-sm">
             {t.selectAChat}
           </p>
         </div>

@@ -138,7 +138,7 @@ const CustomSelect = ({ value, onChange, options, placeholder, icon: Icon }) => 
         </div>
         <ChevronDown 
           size={14} 
-          className={`text-slate-400 transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180' : ''}`} 
+          className={`text-slate-500 dark:text-slate-400 transition-transform duration-300 shrink-0 ${isOpen ? 'rotate-180' : ''}`} 
         />
       </button>
 
@@ -506,7 +506,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
       <div className="flex flex-wrap gap-4 w-full items-center">
         {/* Search Bar */}
         <div className="flex bg-[#FFFFFF] dark:bg-slate-900 border border-[#A2D9E8]/20 dark:border-white/5 p-3 px-4 rounded-2xl shadow-sm items-center flex-1 min-w-[280px] max-w-md gap-3 h-11">
-          <Search size={16} className="text-slate-400 shrink-0" />
+          <Search size={16} className="text-slate-500 dark:text-slate-400 shrink-0" />
           <input
             type="text"
             placeholder={t.searchPlaceholder}
@@ -556,7 +556,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
         {selectedDay && (
           <div className="flex items-center bg-[#FFFFFF] dark:bg-slate-900 border border-[#A2D9E8]/20 dark:border-white/5 p-2 px-4 rounded-2xl shadow-sm gap-2.5 h-11 animate-fade-in w-full sm:w-auto">
             <Clock size={15} className="text-cyan-500 shrink-0" />
-            <span className="text-[11px] font-bold text-slate-400 whitespace-nowrap">{lang === 'th' ? 'ช่วงเวลาทำงาน:' : 'Time Range:'}</span>
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 whitespace-nowrap">{lang === 'th' ? 'ช่วงเวลาทำงาน:' : 'Time Range:'}</span>
             
             {/* Start Time: HH : MM */}
             <div className="flex items-center gap-0.5">
@@ -568,7 +568,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                 className="bg-transparent text-xs text-[#1A365D] dark:text-white outline-none border-b border-[#1A365D]/20 dark:border-white/20 focus:border-[#2B6CB0] dark:focus:border-cyan-400 font-semibold w-6 text-center pb-0.5 placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors"
                 maxLength={2}
               />
-              <span className="text-xs text-slate-400 font-semibold">:</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">:</span>
               <input
                 type="text"
                 placeholder={lang === 'th' ? 'นท' : 'MM'}
@@ -579,7 +579,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
               />
             </div>
 
-            <span className="text-xs font-bold text-slate-400">—</span>
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">—</span>
 
             {/* End Time: HH : MM */}
             <div className="flex items-center gap-0.5">
@@ -591,7 +591,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                 className="bg-transparent text-xs text-[#1A365D] dark:text-white outline-none border-b border-[#1A365D]/20 dark:border-white/20 focus:border-[#2B6CB0] dark:focus:border-cyan-400 font-semibold w-6 text-center pb-0.5 placeholder:text-slate-400 dark:placeholder:text-slate-600 transition-colors"
                 maxLength={2}
               />
-              <span className="text-xs text-slate-400 font-semibold">:</span>
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">:</span>
               <input
                 type="text"
                 placeholder={lang === 'th' ? 'นท' : 'MM'}
@@ -698,7 +698,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                     <div className="flex items-start gap-2">
                       <GraduationCap size={14} className="text-[#2B6CB0] shrink-0 mt-0.5" />
                       <div className="text-left text-[11px] leading-snug">
-                        <span className="text-slate-400 block text-[9px] font-bold uppercase">{t.labelExperience}</span>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[9px] font-bold uppercase">{t.labelExperience}</span>
                         <span className="text-[#1A365D] dark:text-slate-200 font-semibold">{staff.experience}</span>
                       </div>
                     </div>
@@ -709,7 +709,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                     <div className="flex items-start gap-2">
                       <GraduationCap size={14} className="text-[#2B6CB0] shrink-0 mt-0.5" />
                       <div className="text-left text-[11px] leading-snug">
-                        <span className="text-slate-400 block text-[9px] font-bold uppercase">{t.labelQualifications}</span>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[9px] font-bold uppercase">{t.labelQualifications}</span>
                         <span className="text-[#1A365D] dark:text-slate-200 font-semibold">{staff.qualifications}</span>
                       </div>
                     </div>
@@ -720,7 +720,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                     <div className="flex items-start gap-2">
                       <Award size={14} className="text-amber-500 shrink-0 mt-0.5" />
                       <div className="text-left text-[11px] leading-snug">
-                        <span className="text-slate-400 block text-[9px] font-bold uppercase">{t.labelBoardCert}</span>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[9px] font-bold uppercase">{t.labelBoardCert}</span>
                         <span className="text-[#1A365D] dark:text-slate-200 font-semibold">{staff.board_cert}</span>
                       </div>
                     </div>
@@ -731,7 +731,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                     <div className="flex items-start gap-2">
                       <Languages size={14} className="text-indigo-500 shrink-0 mt-0.5" />
                       <div className="text-left text-[11px] leading-snug">
-                        <span className="text-slate-400 block text-[9px] font-bold uppercase">{t.labelLanguages}</span>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[9px] font-bold uppercase">{t.labelLanguages}</span>
                         <span className="text-[#1A365D] dark:text-slate-200 font-semibold">{staff.languages.join(', ')}</span>
                       </div>
                     </div>
@@ -742,7 +742,7 @@ const StaffManager = ({ tenantId, lang, globalSearch }) => {
                     <div className="flex items-start gap-2">
                       <Heart size={14} className="text-[#E53E3E] shrink-0 mt-0.5" />
                       <div className="text-left text-[11px] leading-snug">
-                        <span className="text-slate-400 block text-[9px] font-bold uppercase">{t.labelSpecialInterests}</span>
+                        <span className="text-slate-500 dark:text-slate-400 block text-[9px] font-bold uppercase">{t.labelSpecialInterests}</span>
                         <span className="text-[#1A365D] dark:text-slate-200 font-semibold">{staff.special_interests.join(', ')}</span>
                       </div>
                     </div>

@@ -154,7 +154,7 @@ const DonutChart = ({ segments, centerLabel, centerSub }) => {
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
         <span className="text-lg font-extrabold text-[#1A365D] dark:text-white">{centerLabel}</span>
-        {centerSub && <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider">{centerSub}</span>}
+        {centerSub && <span className="text-[8px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">{centerSub}</span>}
       </div>
     </div>
   );
@@ -375,7 +375,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
           <span className={`flex items-center gap-0.5 ${change >= 0 ? 'text-[#38A169]' : 'text-[#E53E3E]'}`}>
             {change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}{change >= 0 ? '+' : ''}{change}%
           </span>
-          <span className="text-slate-400 font-medium">{t.vsPrev}</span>
+          <span className="text-slate-500 dark:text-slate-400 font-medium">{t.vsPrev}</span>
         </div>
       )}
     </div>
@@ -383,7 +383,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
 
   if (loading) {
     return (
-      <div className="py-20 text-center text-slate-400 text-sm animate-pulse">
+      <div className="py-20 text-center text-slate-500 dark:text-slate-400 text-sm animate-pulse">
         {lang === 'th' ? 'กำลังโหลดข้อมูลวิเคราะห์...' : 'Loading analytics...'}
       </div>
     );
@@ -441,7 +441,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
           <div className="flex justify-between items-start mb-2">
             <div>
               <h3 className="text-base font-extrabold text-[#1A365D] dark:text-white">{t.bookingTrend}</h3>
-              <p className="text-[11px] text-slate-400 font-medium mt-0.5">{t.bookingTrendSub}</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">{t.bookingTrendSub}</p>
             </div>
             <span className="text-[10px] font-bold text-[#2B6CB0] border border-[#2B6CB0]/20 px-2 py-0.5 rounded-md">
               {timeframes.find((x) => x.id === timeframe)?.label}
@@ -455,7 +455,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
         <div className="bg-white dark:bg-slate-900 border border-[#A2D9E8]/20 dark:border-white/5 p-6 rounded-3xl shadow-[0_4px_20px_rgba(26,54,93,0.02)] flex flex-col">
           <h3 className="text-base font-extrabold text-[#1A365D] dark:text-white mb-4">{t.topServices}</h3>
           {topServices.length === 0 ? (
-            <div className="flex-1 flex items-center justify-center text-slate-400 text-xs">{t.noData}</div>
+            <div className="flex-1 flex items-center justify-center text-slate-500 dark:text-slate-400 text-xs">{t.noData}</div>
           ) : (
             <div className="flex items-center gap-5">
               <DonutChart
@@ -490,11 +490,11 @@ const AnalyticsPage = ({ tenantId, lang }) => {
             <h3 className="text-sm font-extrabold text-[#1A365D] dark:text-white flex items-center gap-2">
               <UserCheck size={16} className="text-[#2B6CB0] dark:text-cyan-400" />{t.byStaff}
             </h3>
-            <p className="text-[11px] text-slate-400 font-medium mt-0.5">{t.byStaffSub}</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">{t.byStaffSub}</p>
           </div>
           <div className="flex flex-col gap-3.5">
             {staffPerf.length === 0 ? (
-              <div className="text-slate-400 text-xs text-center py-6">{t.noData}</div>
+              <div className="text-slate-500 dark:text-slate-400 text-xs text-center py-6">{t.noData}</div>
             ) : staffPerf.map((s, i) => (
               <HBar key={i} label={s.name} value={s.count} max={maxStaff} color={s.color} />
             ))}
@@ -507,7 +507,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
             <h3 className="text-sm font-extrabold text-[#1A365D] dark:text-white flex items-center gap-2">
               <Clock size={16} className="text-[#2B6CB0] dark:text-cyan-400" />{t.peakDays}
             </h3>
-            <p className="text-[11px] text-slate-400 font-medium mt-0.5">{t.peakDaysSub}</p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">{t.peakDaysSub}</p>
           </div>
           <div className="flex items-end justify-between gap-1.5 flex-1 min-h-[150px] pt-2">
             {peakDays.map((d, i) => (
@@ -516,7 +516,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
                   <div className="w-full max-w-[26px] rounded-t-md bg-gradient-to-t from-[#2B6CB0] to-[#A2D9E8] transition-all duration-700"
                     style={{ height: `${Math.max(6, (d.count / maxPeak) * 120)}px` }} title={`${d.count}`} />
                 </div>
-                <span className="text-[10px] text-slate-400 font-bold">{d.label}</span>
+                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">{d.label}</span>
               </div>
             ))}
           </div>
@@ -549,7 +549,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
                 <span className="font-extrabold text-[#1A365D] dark:text-white">{chat.escalated}</span>
               </div>
               <div className="border-t border-slate-100 dark:border-white/5 pt-3 flex justify-between items-center text-xs">
-                <span className="text-slate-400 font-medium flex items-center gap-1.5">
+                <span className="text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
                   <MessageSquare size={13} />{t.totalSessions}
                 </span>
                 <span className="font-extrabold text-[#1A365D] dark:text-white">{chat.total}</span>
@@ -565,7 +565,7 @@ const AnalyticsPage = ({ tenantId, lang }) => {
           <TrendingUp size={16} className="text-[#2B6CB0] dark:text-cyan-400" />{t.revenueByService}
         </h3>
         {revenueByService.length === 0 ? (
-          <div className="text-slate-400 text-xs text-center py-6">{t.noData}</div>
+          <div className="text-slate-500 dark:text-slate-400 text-xs text-center py-6">{t.noData}</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-4">
             {revenueByService.map((r, i) => (

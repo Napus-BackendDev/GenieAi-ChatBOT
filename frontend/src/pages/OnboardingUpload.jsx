@@ -651,7 +651,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
   const inputCls = 'w-full h-10 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]';
   const rowInput = 'h-9 px-3 text-xs text-[#1A365D] dark:text-white bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0]';
   const delBtn = 'w-8 h-8 rounded-lg bg-[#E53E3E]/10 hover:bg-[#E53E3E]/20 text-[#E53E3E] flex items-center justify-center border border-[#E53E3E]/20 transition-colors cursor-pointer shrink-0';
-  const emptyCls = 'py-5 text-center text-slate-400 text-xs';
+  const emptyCls = 'py-5 text-center text-slate-500 dark:text-slate-400 text-xs';
 
   const partialParse = parseStatus === 'partial';
 
@@ -673,7 +673,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
 
           <div>
             <h1 className="text-xl font-bold text-[#1A365D] dark:text-white leading-snug">{t.heroTitle}</h1>
-            <p className="text-xs text-slate-400 mt-2 leading-relaxed">{t.heroSub}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">{t.heroSub}</p>
           </div>
 
           <nav className="flex flex-col gap-6 relative pl-3">
@@ -694,7 +694,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                   </div>
                   <div className="text-left">
                     <p className={`text-xs font-bold ${isActive || isDone ? 'text-[#1A365D] dark:text-white' : 'text-slate-400'}`}>{it.title}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{it.sub}</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">{it.sub}</p>
                   </div>
                 </div>
               );
@@ -702,7 +702,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           </nav>
         </div>
 
-        <div className="text-[10px] text-slate-400 font-medium leading-relaxed">
+        <div className="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
           {t.support}<br />
           <span className="text-[#2B6CB0] font-bold">support@genieai.co</span>
         </div>
@@ -713,7 +713,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
 
         {/* Progress header */}
         <div className="w-full flex flex-col gap-3 shrink-0">
-          <div className="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider">
+          <div className="flex justify-between items-center text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
             <span className="text-[#1A365D] dark:text-white">{t.stepOf(step, steps.length)}: {cur.title}</span>
             <span className="text-[#2B6CB0]">{pct}% {t.pctDone}</span>
           </div>
@@ -750,7 +750,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
               <Button onClick={applyAutoFill} size="sm" className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg text-[10px] h-8 px-3.5 cursor-pointer">
                 กรอกข้อมูลอัตโนมัติ
               </Button>
-              <button onClick={() => setShowAutoFillBanner(false)} aria-label={t.dismiss} title={t.dismiss} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold px-1.5 py-1 cursor-pointer">
+              <button onClick={() => setShowAutoFillBanner(false)} aria-label={t.dismiss} title={t.dismiss} className="text-slate-500 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs font-bold px-1.5 py-1 cursor-pointer">
                 ❌
               </button>
             </div>
@@ -809,11 +809,11 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                   </div>
                   <div className="text-center">
                     <h3 className="font-semibold text-[#1A365D] dark:text-white text-base">{t.dropHere}</h3>
-                    <p className="text-[11px] text-slate-400 mt-1.5 font-medium leading-relaxed">{t.dropHint}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 font-medium leading-relaxed">{t.dropHint}</p>
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); folderInputRef.current?.click(); }}
-                      className="mt-3 text-xs font-bold text-[#2B6CB0] underline underline-offset-2 hover:text-[#1A365D]"
+                      className="mt-3 text-xs font-bold text-[#2B6CB0] underline underline-offset-2 hover:text-[#1A365D] dark:text-white"
                     >
                       {t.pickFolder}
                     </button>
@@ -823,7 +823,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                   <HelpCircle size={18} className="text-[#2B6CB0] shrink-0 mt-0.5" />
                   <div>
                     <h4 className="text-xs font-bold text-[#1A365D] dark:text-white">{t.tipTitle}</h4>
-                    <p className="text-[10px] text-slate-400 mt-1 leading-relaxed">{t.tipBody}</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{t.tipBody}</p>
                   </div>
                 </div>
               </div>
@@ -847,7 +847,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                   onConnected={() => setLineConfigured(true)}
                 />
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">{t.connectNote}</p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">{t.connectNote}</p>
             </div>
           )}
 
@@ -1044,14 +1044,14 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
                         {rawText && (
                           <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 dark:border-white/5">
                             <button type="button" onClick={() => setShowRaw(!showRaw)}
-                              className="self-start flex items-center gap-1.5 text-[11px] font-semibold text-slate-400 hover:text-[#2B6CB0] cursor-pointer">
+                              className="self-start flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 dark:text-slate-400 hover:text-[#2B6CB0] cursor-pointer">
                               <FileText size={12} />
                               <ChevronDown size={12} className={`transition-transform ${showRaw ? 'rotate-180' : ''}`} />
                               {t.advanced}
                             </button>
                             {showRaw && (
                               <div className="flex flex-col gap-1.5 animate-fade-in">
-                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.rawText}</span>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">{t.rawText}</span>
                                 <textarea value={rawText} onChange={(e) => setRawText(e.target.value)} rows={6}
                                   className="w-full p-3 text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-white/10 rounded-xl outline-none focus:border-[#2B6CB0] resize-none" />
                               </div>
@@ -1088,7 +1088,7 @@ const OnboardingUpload = ({ tenantId, user = {}, lang = 'th', onOnboardingComple
           <div className="w-full flex items-center justify-between border-t border-slate-200/60 dark:border-white/5 pt-6 shrink-0 mt-4">
             {step > 1 ? (
               <button type="button" onClick={() => setStep(step - 1)}
-                className="flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-[#2B6CB0] transition-colors cursor-pointer">
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-[#2B6CB0] transition-colors cursor-pointer">
                 <ArrowLeft size={14} /> {t.back}
               </button>
             ) : <span />}

@@ -322,7 +322,7 @@ const ChannelConnectCard = ({
             className="w-full"
           />
           {(lineConfigured || savedOnce) && !token.trim() && (
-            <span className="text-[10px] text-slate-400 flex items-center gap-1">
+            <span className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1">
               <Info size={11} /> {t.savedTokenNote}
             </span>
           )}
@@ -342,7 +342,7 @@ const ChannelConnectCard = ({
 
       {/* Webhook URL with copy */}
       <div className="flex flex-col gap-1.5 bg-white dark:bg-slate-900/60 p-3.5 rounded-2xl border border-[#A2D9E8]/30 dark:border-white/5">
-        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{t.webhookLabel}</span>
+        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">{t.webhookLabel}</span>
         <div className="flex items-center gap-2">
           <code className="text-[11px] text-[#2B6CB0] dark:text-cyan-400 font-mono break-all flex-1">{webhookUrl}</code>
           <button
