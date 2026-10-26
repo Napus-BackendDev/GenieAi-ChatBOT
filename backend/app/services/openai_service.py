@@ -244,10 +244,10 @@ BOOKING_TOOLS = [
                     },
                     "availability_token": {
                         "type": "string",
-                        "description": "One-time token returned by check_booking_availability. Required before creating a booking."
+                        "description": "Optional and ignored: the system verifies availability itself before creating the booking."
                     }
                 },
-                "required": ["customer_name", "phone_number", "email", "service_topic", "booking_datetime", "availability_token"]
+                "required": ["customer_name", "phone_number", "email", "service_topic", "booking_datetime"]
             }
         }
     }
@@ -384,20 +384,37 @@ async def chat_completion_with_tools(
                         service_topic=function_args.get("service_topic"),
                     )
                 elif function_name == "create_booking":
-                    result = await create_booking(
-                        customer_name=function_args.get("customer_name"),
-                        phone_number=function_args.get("phone_number"),
-                        email=function_args.get("email"),
-                        service_topic=function_args.get("service_topic"),
+                    # The capability token is minted HERE for the exact slot/staff/service the model is
+                    # booking. Asking the model to copy a 43-char token (and repeat the date, doctor and
+                    # service byte-for-byte) made production bookings fail whenever it paraphrased one.
+                    avail = await check_booking_availability(
                         booking_datetime=function_args.get("booking_datetime"),
                         tenant_id=tenant_id,
                         staff_name=function_args.get("staff_name"),
-                        availability_token=function_args.get("availability_token")
+                        service_topic=function_args.get("service_topic"),
                     )
+                    if not avail.get("available"):
+                        result = {"status": "error", "reason": avail.get("reason"), "message": avail.get("message")}
+                    else:
+                        result = await create_booking(
+                            customer_name=function_args.get("customer_name"),
+                            phone_number=function_args.get("phone_number"),
+                            email=function_args.get("email"),
+                            service_topic=function_args.get("service_topic"),
+                            booking_datetime=function_args.get("booking_datetime"),
+                            tenant_id=tenant_id,
+                            staff_name=function_args.get("staff_name"),
+                            availability_token=avail.get("availability_token"),
+                        )
                 else:
                     result = {"status": "error", "message": f"Unknown tool: {function_name}"}
                 
-                logger.info("Tool execution completed: %s", function_name)
+                logger.info(
+                    "Tool execution completed: %s (status=%s, reason=%s)",
+                    function_name,
+                    (result or {}).get("status", (result or {}).get("available")) if isinstance(result, dict) else None,
+                    (result or {}).get("reason") if isinstance(result, dict) else None,
+                )
                 
                 # Append tool result to messages
                 full_messages.append({
@@ -424,8 +441,8 @@ _TOOL_ARGUMENTS = {
     "get_staff_on_duty": {"required": {"day"}, "optional": {"specialty"}},
     "check_booking_availability": {"required": {"booking_datetime"}, "optional": {"staff_name", "service_topic"}},
     "create_booking": {
-        "required": {"customer_name", "phone_number", "email", "service_topic", "booking_datetime", "availability_token"},
-        "optional": {"staff_name"},
+        "required": {"customer_name", "phone_number", "email", "service_topic", "booking_datetime"},
+        "optional": {"staff_name", "availability_token"},
     },
 }
 

@@ -372,7 +372,9 @@ async def check_booking_availability(
         if issue_token
         else None
     )
-    if settings.is_production and not availability_token:
+    # Only when a token was requested: create_booking re-checks with issue_token=False, and failing that
+    # re-check made every booking fail in production.
+    if issue_token and settings.is_production and not availability_token:
         return {
             "available": False,
             "reason": "availability_guard_unavailable",

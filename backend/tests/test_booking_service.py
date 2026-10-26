@@ -204,3 +204,18 @@ def test_same_staff_matches_llm_and_profile_names():
     assert _same_staff("สมชาย", "ทพ.สมชาย")
     assert not _same_staff("ทพ.สมหญิง", "ทพ.สมชาย")
     assert not _same_staff("", "ทพ.สมชาย")
+
+
+def test_production_recheck_without_token_is_available(isolated_bookings, monkeypatch):
+    """Regression: create_booking re-checks with issue_token=False; the production guard must not reject that,
+    or every booking failed with 'availability_guard_unavailable' on production."""
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    res = booking_service.check_booking_availability_sync("2099-01-01T10:00:00", tenant_id="t1", issue_token=False)
+    assert res["available"] is True
+
+    # ...while a request that asks for a token still fails closed when the token store is down
+    async def no_token(*_a, **_k):
+        return None
+    monkeypatch.setattr(booking_service, "_issue_availability_token", no_token)
+    res = booking_service.check_booking_availability_sync("2099-01-01T10:00:00", tenant_id="t1")
+    assert res["available"] is False and res["reason"] == "availability_guard_unavailable"

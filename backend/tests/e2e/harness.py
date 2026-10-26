@@ -18,6 +18,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 import httpx  # noqa: E402
 from app.main import app  # noqa: E402
 from app.core.redis import init_redis  # noqa: E402
+from app.core.config import settings as _settings  # noqa: E402
+
+if os.environ.get("E2E_STRICT") == "1":
+    # Exercise the production-only branches (capability tokens, fail-closed guards) without the full
+    # production config validation, which only runs in the app lifespan.
+    _settings.ENVIRONMENT = "production"
 import app.routers.webhooks as wh  # noqa: E402
 import app.routers.chat as chat_mod  # noqa: E402
 
