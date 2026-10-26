@@ -215,9 +215,10 @@ async def _index_document_mongo(parsed_doc: dict, tenant_id: str, content_hash: 
         pages_meta.append({"page_number": page_num, "images": page.get("images") or []})
         if not page_text:
             continue
-        for index, chunk in enumerate(chunk_text(page_text)):
+        for chunk in chunk_text(page_text):
+            # chunk_index must be unique per document (uniq_knowledge_chunk index), not per page
             chunks.append({
-                "chunk_index": index,
+                "chunk_index": len(chunks),
                 "page_number": page_num,
                 "text": chunk,
                 "instruction_like": _contains_instruction_like(chunk),
