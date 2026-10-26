@@ -1005,13 +1005,61 @@ async def db_append_message(tenant_id: str, session_id: str, role: str, content:
         _save_conversations_json(convos)
 
 
+def _ts_key(message: dict):
+    """Sortable instant for legacy ('...Z' strings) and new (datetime / isoformat) message timestamps."""
+    raw = message.get("ts")
+    try:
+        if hasattr(raw, "isoformat"):
+            value = raw
+        else:
+            value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+async def _attach_durable_messages(db, tenant_id: str, convos: list[dict], per_chat: int = 300) -> list[dict]:
+    """Messages written since durable storage live in `conversation_messages`; older conversations still
+    carry an embedded `messages` list. The inbox needs both, or recent chats look empty/stale."""
+    if not convos:
+        return convos
+    ids = [c.get("session_id") for c in convos if c.get("session_id")]
+    by_session: dict[str, list[dict]] = {}
+    try:
+        cursor = db.conversation_messages.find(
+            {"tenant_id": tenant_id, "session_id": {"$in": ids}}
+        ).sort("created_at", -1)
+        for doc in await cursor.to_list(length=per_chat * max(1, len(ids))):
+            bucket = by_session.setdefault(doc.get("session_id"), [])
+            if len(bucket) < per_chat:
+                created = doc.get("created_at")
+                bucket.append({
+                    "role": doc.get("role"),
+                    "content": doc.get("content", ""),
+                    "ts": created.isoformat() if hasattr(created, "isoformat") else created,
+                    **({"channel": doc["channel"]} if doc.get("channel") else {}),
+                })
+    except Exception as e:
+        logger.error(f"Error loading conversation_messages for inbox: {e}")
+    for conv in convos:
+        merged = list(conv.get("messages") or [])
+        seen = {(m.get("role"), m.get("content"), str(m.get("ts"))[:19]) for m in merged}
+        for m in by_session.get(conv.get("session_id"), []):
+            if (m["role"], m["content"], str(m["ts"])[:19]) not in seen:
+                merged.append(m)
+        merged.sort(key=_ts_key)
+        conv["messages"] = merged
+    return convos
+
+
 async def db_list_conversations(tenant_id: str) -> list[dict]:
     """All conversations for a tenant, newest activity first (for the inbox list)."""
     db = _mongo_db_or_none()
     if db is not None:
         try:
             cursor = db.conversations.find({"tenant_id": tenant_id}).sort("updated_at", -1)
-            return [_clean_mongo_doc(c) for c in await cursor.to_list(length=1000)]
+            convos = [_clean_mongo_doc(c) for c in await cursor.to_list(length=1000)]
+            return await _attach_durable_messages(db, tenant_id, convos)
         except Exception as e:
             logger.error(f"Error listing conversations from MongoDB: {e}")
 
