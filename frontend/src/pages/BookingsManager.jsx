@@ -324,7 +324,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
   const calendarCells = [];
   // Prefix empty blocks for previous month offset
   for (let i = 0; i < firstDayIndex; i++) {
-    calendarCells.push(<div key={`empty-${i}`} className="aspect-square w-full"></div>);
+    calendarCells.push(<div key={`empty-${i}`} className="aspect-square w-full max-h-14"></div>);
   }
   // Month dates
   for (let d = 1; d <= daysInMonth; d++) {
@@ -340,7 +340,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
         onClick={() => setSelectedDate(dateOfCell)}
         aria-label={`${d} — ${count} ${lang === 'en' ? 'bookings' : 'นัด'}`}
         aria-pressed={isSelected}
-        className={`aspect-square w-full flex flex-col items-center justify-center gap-1 rounded-xl transition-all duration-200 cursor-pointer relative ${
+        className={`aspect-square w-full max-h-14 flex flex-col items-center justify-center gap-1 rounded-xl transition-all duration-200 cursor-pointer relative ${
           isSelected
             ? 'bg-gradient-to-br from-cyan-500 to-indigo-500 text-white shadow-lg shadow-cyan-500/30 font-bold'
             : isToday
@@ -371,7 +371,7 @@ const BookingsManager = ({ tenantId, lang, globalSearch }) => {
   const usedCells = firstDayIndex + daysInMonth;
   const trailing = (7 - (usedCells % 7)) % 7;
   for (let i = 0; i < trailing; i++) {
-    calendarCells.push(<div key={`trail-${i}`} className="aspect-square w-full"></div>);
+    calendarCells.push(<div key={`trail-${i}`} className="aspect-square w-full max-h-14"></div>);
   }
 
   if (loading) {
